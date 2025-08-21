@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Spawn - Asteroids</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            background-color: #000;
+            color: #0f0;
+            font-family: monospace;
+            padding: 20px;
+        }
+        button {
+            background: #333;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-family: monospace;
+        }
+        button:hover {
+            background: #444;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 10px;
+            border: 1px solid #0f0;
+            min-height: 100px;
+        }
+        .log {
+            margin: 2px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Multiplayer Spawn Test</h1>
+    <p>Use this page to test spawning asteroids and enemies in multiplayer mode.</p>
+    
+    <div>
+        <button onclick="checkGameState()">Check Game State</button>
+        <button onclick="forceHostStatus()">Force Host Status</button>
+        <button onclick="spawnAsteroid()">Spawn Asteroid</button>
+        <button onclick="spawnEnemy()">Spawn Enemy</button>
+        <button onclick="spawnBoth()">Spawn Both</button>
+    </div>
+    
+    <div id="status"></div>
+    
+    <script>
+        function log(message) {
+            const status = document.getElementById('status');
+            const logDiv = document.createElement('div');
+            logDiv.className = 'log';
+            logDiv.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            status.insertBefore(logDiv, status.firstChild);
+        }
+        
+        function checkGameState() {
+            if (!window.game) {
+                log('❌ Game not initialized. Please start a multiplayer game first.');
+                return;
+            }
+            
+            log(`Game State:`);
+            log(`  - Mode: ${window.game.mode || 'not set'}`);
+            log(`  - Is Multiplayer: ${window.game.isMultiplayer ? window.game.isMultiplayer() : 'false'}`);
+            log(`  - Is Host: ${window.game.isHost}`);
+            log(`  - Session ID: ${window.game.sessionId || 'none'}`);
+            log(`  - Player ID: ${window.game.playerId || 'none'}`);
+            log(`  - Asteroids: ${window.game.asteroids ? window.game.asteroids.length : 0}`);
+            log(`  - Enemies: ${window.game.enemies ? window.game.enemies.length : 0}`);
+            log(`  - World Bounds: ${window.game.worldBounds ? `${window.game.worldBounds.width}x${window.game.worldBounds.height}` : 'not set'}`);
+        }
+        
+        function forceHostStatus() {
+            if (!window.game) {
+                log('❌ Game not initialized');
+                return;
+            }
+            
+            window.game.isHost = true;
+            log('✅ Forced host status to TRUE');
+            checkGameState();
+        }
+        
+        function spawnAsteroid() {
+            if (!window.game) {
+                log('❌ Game not initialized');
+                return;
+            }
+            
+            // Add the spawn function if it doesn't exist
+            if (!window.game.spawnMultiplayerAsteroid) {
+                log('⚠️ Adding spawn function to game object...');
+                window.game.spawnMultiplayerAsteroid = function() {
+                    console.log('🌑 Manual spawn asteroid, isHost =', this.isHost);
+                    
+                    // Force spawn regardless of host status for testing
+                    const asteroidId = 'ast_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    const x = Math.random() * (this.worldBounds.width || 2000);
+                    const y = Math.random() * (this.worldBounds.height || 1500);
+                    const size = 3;
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = 1 + Math.random() * 0.5;
+                    const vx = Math.cos(angle) * speed;
+                    const vy = Math.sin(angle) * speed;
+                    const seed = Math.floor(Math.random() * 10000);
+                    
+                    // Create asteroid locally
+                    const asteroid = new Asteroid(x, y, size, this);
+                    asteroid.id = asteroidId;
+                    asteroid.xv = vx;
+                    asteroid.yv = vy;
+                    asteroid.seed = seed;
+                    this.asteroids.push(asteroid);
+                    
+                    // Broadcast if we have socket
+                    if (window.socketManager && window.socketManager.socket) {
+                        console.log('🌑 Broadcasting asteroid spawn');
+                        window.socketManager.socket.emit('asteroid-spawn', {
+                            id: asteroidId,
+                            x: x,
+                            y: y,
+                            vx: vx,
+                            vy: vy,
+                            size: size,
+                            seed: seed
+                        });
+                    }
+                    
+                    return asteroid;
+                };
+            }
+            
+            const asteroid = window.game.spawnMultiplayerAsteroid();
+            if (asteroid) {
+                log(`✅ Spawned asteroid at (${Math.round(asteroid.x)}, ${Math.round(asteroid.y)})`);
+            } else {
+                log('⚠️ Asteroid spawn returned null');
+            }
+            
+            log(`Total asteroids: ${window.game.asteroids.length}`);
+        }
+        
+        function spawnEnemy() {
+            if (!window.game) {
+                log('❌ Game not initialized');
+                return;
+            }
+            
+            // Add the spawn function if it doesn't exist
+            if (!window.game.spawnMultiplayerEnemy) {
+                log('⚠️ Adding enemy spawn function to game object...');
+                window.game.spawnMultiplayerEnemy = function() {
+                    console.log('👾 Manual spawn enemy, isHost =', this.isHost);
+                    
+                    // Force spawn regardless of host status for testing
+                    const enemyId = 'enemy_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    const x = Math.random() * (this.worldBounds.width || 2000);
+                    const y = Math.random() * (this.worldBounds.height || 1500);
+                    
+                    // Create enemy locally
+                    const enemy = new Enemy(x, y, this);
+                    enemy.id = enemyId;
+                    this.enemies.push(enemy);
+                    
+                    // Start broadcasting enemy updates if host
+                    if (this.isHost && !this.enemyUpdateInterval) {
+                        this.enemyUpdateInterval = setInterval(() => {
+                            if (this.broadcastEnemyStates) {
+                                this.broadcastEnemyStates();
+                            }
+                        }, 100);
+                    }
+                    
+                    return enemy;
+                };
+            }
+            
+            const enemy = window.game.spawnMultiplayerEnemy();
+            if (enemy) {
+                log(`✅ Spawned enemy at (${Math.round(enemy.x)}, ${Math.round(enemy.y)})`);
+            } else {
+                log('⚠️ Enemy spawn returned null');
+            }
+            
+            log(`Total enemies: ${window.game.enemies.length}`);
+        }
+        
+        function spawnBoth() {
+            spawnAsteroid();
+            spawnEnemy();
+        }
+        
+        // Initial check
+        setTimeout(() => {
+            log('Page loaded. Checking game state...');
+            checkGameState();
+        }, 1000);
+    </script>
+</body>
+</html>

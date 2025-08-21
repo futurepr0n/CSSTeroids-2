@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Custom Ships Multiplayer Test</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: #000; 
+            color: white; 
+            font-family: Arial; 
+            overflow: hidden;
+        }
+        canvas { 
+            background: #000; 
+            display: block; 
+        }
+        #ui { 
+            position: absolute; 
+            top: 10px; 
+            left: 10px; 
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 300px;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        button { 
+            padding: 10px 15px; 
+            margin: 5px; 
+            background: #333; 
+            color: white; 
+            border: 1px solid #666; 
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover { background: #555; }
+        button:disabled { background: #222; cursor: not-allowed; }
+        input {
+            padding: 8px;
+            background: #333;
+            color: white;
+            border: 1px solid #666;
+            border-radius: 3px;
+            margin: 5px;
+            width: 180px;
+            outline: none;
+        }
+        input:focus {
+            background: #444;
+            border-color: #888;
+        }
+        .status { margin: 5px 0; font-size: 14px; }
+        .connected { color: #0f0; }
+        .disconnected { color: #f00; }
+        .waiting { color: #ff0; }
+        .loading { color: #fa0; }
+        .error { color: #f44; }
+        .ship-info { 
+            margin: 8px 0; 
+            padding: 8px; 
+            background: rgba(255,255,255,0.1); 
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .ship-name { font-weight: bold; color: #4af; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h3>Custom Ships Multiplayer</h3>
+        
+        <!-- Connection Status -->
+        <div class="status">Status: <span id="status" class="disconnected">Disconnected</span></div>
+        <div class="status">Session: <span id="sessionDisplay">None</span></div>
+        <div class="status">Room Size: <span id="roomSize">0</span></div>
+        <div class="status">World: 2000x1500 (fixed boundaries)</div>
+        
+        <!-- Ship Loading -->
+        <div style="margin: 10px 0;">
+            <input type="text" id="passphraseInput" placeholder="Ship Passphrase" value="test-ship-123">
+            <button id="loadShipBtn" onclick="loadMyShip()">Load Ship</button>
+        </div>
+        
+        <!-- My Ship Info -->
+        <div id="myShipInfo" class="ship-info" style="display: none;">
+            <div class="ship-name">My Ship: <span id="myShipName">None</span></div>
+            <div>Lines: <span id="myShipLines">0</span> | Thrusters: <span id="myShipThrusters">0</span> | Weapons: <span id="myShipWeapons">0</span></div>
+            <div>Color: <span id="myShipColor">None</span> | Type: <span id="myShipType">None</span></div>
+            <div>Player ID: <span id="myShipId">None</span></div>
+        </div>
+        
+        <!-- Session Controls -->
+        <div style="margin: 10px 0;">
+            <input type="text" id="sessionInput" placeholder="Session ID" value="ship-test-456">
+            <button id="connectBtn" onclick="connect()" disabled>Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+        
+        <!-- Other Ships -->
+        <div class="status">Other Ships: <span id="otherShipCount">0</span></div>
+        <div id="otherShipsInfo" style="margin: 10px 0; font-size: 12px;"></div>
+        
+        <div style="margin-top: 15px; font-size: 12px; opacity: 0.8;">
+            <div><strong>Setup:</strong></div>
+            <div>1. Create ship at <a href="/ship-customization.html" target="_blank" style="color: #4af;">/ship-customization.html</a></div>
+            <div>2. Load your ship here with passphrase</div>
+            <div>3. Connect to session</div>
+            <div><strong>Controls:</strong></div>
+            <div>↑/W: Thrust | ←→/AD: Turn</div>
+            <div>↓/S/Space: Fire weapons</div>
+            <div><strong>Visual:</strong></div>
+            <div>Green = You, Red = Others</div>
+            <div>Yellow bullets, Orange flames</div>
+            <div>Cyan dashed line = World boundary</div>
+        </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Canvas setup
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Game state
+        let socket = null;
+        let myShipId = null;
+        let currentSession = null;
+        let isConnected = false;
+        let myShipData = null; // Will store loaded ship design
+        
+        // World boundaries (same as previous multiplayer implementation)
+        const WORLD_WIDTH = 2000;
+        const WORLD_HEIGHT = 1500;
+        
+        // My ship physics
+        let myShip = {
+            x: WORLD_WIDTH / 2,  // Spawn at center of world
+            y: WORLD_HEIGHT / 2,
+            vx: 0,
+            vy: 0,
+            angle: 0,
+            id: null,
+            thrusting: false,
+            canShoot: true,
+            shootingCooldown: 0,
+            radius: 12 // Ship collision radius for boundaries
+        };
+        
+        // Bullets array for all players
+        let bullets = [];
+        
+        // Other ships - stores both physics and design data
+        let otherShips = new Map();
+        
+        // Input state
+        const keys = {};
+        
+        // UI elements
+        const statusEl = document.getElementById('status');
+        const sessionEl = document.getElementById('sessionDisplay');
+        const roomSizeEl = document.getElementById('roomSize');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const loadShipBtn = document.getElementById('loadShipBtn');
+        const myShipInfo = document.getElementById('myShipInfo');
+        const myShipName = document.getElementById('myShipName');
+        const myShipLines = document.getElementById('myShipLines');
+        const myShipThrusters = document.getElementById('myShipThrusters');
+        const myShipWeapons = document.getElementById('myShipWeapons');
+        const myShipColor = document.getElementById('myShipColor');
+        const myShipType = document.getElementById('myShipType');
+        const myShipIdEl = document.getElementById('myShipId');
+        const otherShipCount = document.getElementById('otherShipCount');
+        const otherShipsInfo = document.getElementById('otherShipsInfo');
+        
+        // Load ship from database
+        async function loadMyShip() {
+            const passphrase = document.getElementById('passphraseInput').value.trim();
+            if (!passphrase) {
+                alert('Please enter a ship passphrase');
+                return;
+            }
+            
+            updateStatus('Loading ship...', 'loading');
+            loadShipBtn.disabled = true;
+            loadShipBtn.textContent = 'Loading...';
+            
+            try {
+                console.log('🚢 Loading ship with passphrase:', passphrase);
+                const response = await fetch(`/api/ships/passphrase/${passphrase}`);
+                
+                if (!response.ok) {
+                    throw new Error('Ship not found');
+                }
+                
+                myShipData = await response.json();
+                console.log('🚢 Loaded ship data:', myShipData);
+                
+                // Update UI
+                myShipName.textContent = myShipData.name;
+                myShipLines.textContent = myShipData.customLines?.length || 0;
+                myShipThrusters.textContent = myShipData.thrusterPoints?.length || 0;
+                myShipWeapons.textContent = myShipData.weaponPoints?.length || 0;
+                myShipColor.textContent = myShipData.color || 'white';
+                myShipType.textContent = myShipData.type || 'custom';
+                myShipInfo.style.display = 'block';
+                
+                console.log('🚢 Ship color loaded:', myShipData.color);
+                console.log('🚢 Ship data structure:', myShipData);
+                
+                // Enable connect button
+                connectBtn.disabled = false;
+                updateStatus('Ship loaded - ready to connect', 'waiting');
+                
+            } catch (error) {
+                console.error('🚢 Error loading ship:', error);
+                updateStatus('Ship not found', 'error');
+                alert('Ship not found with that passphrase');
+            } finally {
+                loadShipBtn.disabled = false;
+                loadShipBtn.textContent = 'Load Ship';
+            }
+        }
+        
+        // Connect to server
+        function connect() {
+            if (socket && socket.connected) {
+                console.log('Already connected');
+                return;
+            }
+            
+            if (!myShipData) {
+                alert('Please load a ship first');
+                return;
+            }
+            
+            const sessionId = document.getElementById('sessionInput').value.trim();
+            if (!sessionId) {
+                alert('Please enter a session ID');
+                return;
+            }
+            
+            updateStatus('Connecting...', 'waiting');
+            console.log('🔌 Connecting to server...');
+            
+            const serverUrl = `${window.location.protocol}//${window.location.hostname}:6161`;
+            console.log('Connecting to server at:', serverUrl);
+            socket = io(serverUrl);
+            
+            socket.on('connect', () => {
+                console.log('✅ Connected to server, socket ID:', socket.id);
+                myShipId = socket.id;
+                myShip.id = socket.id;
+                isConnected = true;
+                
+                updateStatus('Connected', 'connected');
+                updateMyShipId(socket.id);
+                
+                // Join the session
+                console.log('🎯 Joining session:', sessionId);
+                socket.emit('join-simple-session', sessionId);
+            });
+            
+            socket.on('disconnect', () => {
+                console.log('❌ Disconnected from server');
+                isConnected = false;
+                currentSession = null;
+                otherShips.clear();
+                
+                updateStatus('Disconnected', 'disconnected');
+                updateSessionDisplay(null);
+                updateShipCounts();
+                updateButtons();
+            });
+            
+            socket.on('session-joined', (data) => {
+                console.log('✅ Session joined:', data);
+                currentSession = data.sessionId;
+                
+                updateSessionDisplay(data.sessionId);
+                updateRoomSize(data.playerCount);
+                updateButtons();
+                
+                // Broadcast my ship design to other players
+                if (myShipData) {
+                    console.log('🚢 Broadcasting my ship data to session');
+                    socket.emit('player-ship-data', {
+                        shipData: myShipData
+                    });
+                }
+            });
+            
+            socket.on('player-joined', (data) => {
+                console.log('👤 Player joined:', data.playerId);
+                updateRoomSize(); // Will be updated by ship data or player update
+            });
+            
+            socket.on('player-left', (data) => {
+                console.log('👤 Player left:', data.playerId);
+                otherShips.delete(data.playerId);
+                updateShipCounts();
+            });
+            
+            socket.on('player-ship-data', (data) => {
+                console.log('🚢 Received ship data from player:', data.playerId, data.shipData);
+                console.log('🚢 Ship data details:', {
+                    name: data.shipData?.name,
+                    customLinesCount: data.shipData?.customLines?.length || 0,
+                    color: data.shipData?.color
+                });
+                
+                // Store ship design for this player
+                if (!otherShips.has(data.playerId)) {
+                    console.log(`🚢 Creating new ship entry for player: ${data.playerId}`);
+                    otherShips.set(data.playerId, {
+                        id: data.playerId,
+                        x: WORLD_WIDTH / 2 + Math.random() * 100 - 50,  // Spawn in world center
+                        y: WORLD_HEIGHT / 2 + Math.random() * 100 - 50,
+                        angle: 0,
+                        radius: 12,
+                        shipData: data.shipData
+                    });
+                } else {
+                    // Update existing ship's design
+                    console.log(`🚢 Updating ship data for existing player: ${data.playerId}`);
+                    const ship = otherShips.get(data.playerId);
+                    ship.shipData = data.shipData;
+                }
+                
+                console.log(`🚢 Total ships tracked: ${otherShips.size}`);
+                updateShipCounts();
+            });
+            
+            socket.on('player-update', (data) => {
+                // Only process updates from other players
+                if (data.playerId !== myShipId) {
+                    updateOtherShip(data);
+                }
+            });
+            
+            // Handle request for ship data from new players
+            socket.on('request-ship-data', (data) => {
+                console.log('🔄 Server requesting ship data for new player:', data.newPlayerId);
+                
+                // Send my ship data to help the new player
+                if (myShipData && currentSession) {
+                    console.log('🚢 Broadcasting my ship data to new player');
+                    socket.emit('player-ship-data', {
+                        shipData: myShipData
+                    });
+                }
+            });
+            
+            // Handle bullet sync from other players
+            socket.on('bullet-fired', (bulletData) => {
+                console.log('🔫 Received bullet from player:', bulletData.ownerId);
+                
+                // Only add bullets from other players
+                if (bulletData.ownerId !== myShipId) {
+                    bullets.push(bulletData);
+                }
+            });
+        }
+        
+        function disconnect() {
+            if (socket) {
+                console.log('🔌 Disconnecting...');
+                socket.disconnect();
+                socket = null;
+            }
+            
+            isConnected = false;
+            currentSession = null;
+            myShipId = null;
+            otherShips.clear();
+            
+            updateStatus('Disconnected', 'disconnected');
+            updateSessionDisplay(null);
+            updateMyShipId(null);
+            updateShipCounts();
+            updateButtons();
+        }
+        
+        function updateOtherShip(data) {
+            if (!otherShips.has(data.playerId)) {
+                console.log('➕ Creating ship for new player (via position update):', data.playerId);
+                otherShips.set(data.playerId, {
+                    id: data.playerId,
+                    x: data.x,
+                    y: data.y,
+                    angle: data.angle,
+                    thrusting: data.thrusting || false,
+                    vx: data.vx || 0,
+                    vy: data.vy || 0,
+                    radius: 12,
+                    shipData: null // Will be set when ship data arrives
+                });
+                console.log('⚠️ Ship created without design data - waiting for ship-data event');
+            } else {
+                // Update existing ship position and state, preserve ship data
+                const ship = otherShips.get(data.playerId);
+                ship.x = data.x;
+                ship.y = data.y;
+                ship.angle = data.angle;
+                ship.thrusting = data.thrusting || false;
+                ship.vx = data.vx || 0;
+                ship.vy = data.vy || 0;
+                // Importantly: DON'T overwrite ship.shipData here
+                
+                // Debug: Check if ship data is still intact
+                if (!ship.shipData) {
+                    console.warn(`⚠️ Ship ${data.playerId} lost its design data during position update!`);
+                }
+            }
+            
+            updateShipCounts();
+        }
+        
+        // UI update functions
+        function updateStatus(text, className) {
+            statusEl.textContent = text;
+            statusEl.className = className;
+        }
+        
+        function updateSessionDisplay(sessionId) {
+            sessionEl.textContent = sessionId || 'None';
+        }
+        
+        function updateMyShipId(id) {
+            myShipIdEl.textContent = id ? id.substr(-6) : 'None';
+        }
+        
+        function updateShipCounts() {
+            const otherCount = otherShips.size;
+            otherShipCount.textContent = otherCount;
+            
+            // Update other ships info
+            let infoHtml = '';
+            for (const [id, ship] of otherShips) {
+                const shipName = ship.shipData?.name || 'Loading...';
+                const shortId = id.substr(-4);
+                infoHtml += `<div>${shortId}: ${shipName}</div>`;
+            }
+            otherShipsInfo.innerHTML = infoHtml || '<div>No other ships</div>';
+        }
+        
+        function updateRoomSize(size) {
+            if (size !== undefined) {
+                roomSizeEl.textContent = size;
+            }
+        }
+        
+        function updateButtons() {
+            connectBtn.disabled = isConnected || !myShipData;
+            disconnectBtn.disabled = !isConnected;
+        }
+        
+        // Input handling - only capture keys when not in input fields
+        window.addEventListener('keydown', (e) => {
+            // Don't capture keys if user is typing in an input field
+            if (e.target.tagName === 'INPUT') {
+                return;
+            }
+            
+            keys[e.key] = true;
+            
+            // Handle weapon firing on keydown (one-shot)
+            if ((e.key === 'ArrowDown' || e.key === 's' || e.key === ' ') && isConnected && currentSession) {
+                fireWeapon();
+            }
+            
+            e.preventDefault();
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            // Don't capture keys if user is typing in an input field
+            if (e.target.tagName === 'INPUT') {
+                return;
+            }
+            
+            keys[e.key] = false;
+            e.preventDefault();
+        });
+        
+        // Update my ship
+        function updateMyShip() {
+            // Update shooting cooldown
+            if (myShip.shootingCooldown > 0) {
+                myShip.shootingCooldown -= 1/60; // 60 FPS
+                if (myShip.shootingCooldown <= 0) {
+                    myShip.canShoot = true;
+                }
+            }
+            
+            // Check thrust input
+            myShip.thrusting = keys['ArrowUp'] || keys['w'];
+            
+            // Simple movement with arrow keys
+            if (myShip.thrusting) {
+                myShip.vx += Math.cos(myShip.angle) * 0.3;
+                myShip.vy += Math.sin(myShip.angle) * 0.3;
+            }
+            if (keys['ArrowLeft'] || keys['a']) {
+                myShip.angle -= 0.08;
+            }
+            if (keys['ArrowRight'] || keys['d']) {
+                myShip.angle += 0.08;
+            }
+            
+            // Apply friction
+            myShip.vx *= 0.98;
+            myShip.vy *= 0.98;
+            
+            // Update position
+            myShip.x += myShip.vx;
+            myShip.y += myShip.vy;
+            
+            // World boundary collision (replaces screen wrapping in multiplayer)
+            handleShipBoundaries(myShip);
+        }
+        
+        // Ship boundary handling (from previous multiplayer implementation)
+        function handleShipBoundaries(ship) {
+            if (!ship.radius) ship.radius = 12;
+            
+            const minX = ship.radius;
+            const maxX = WORLD_WIDTH - ship.radius;
+            const minY = ship.radius;
+            const maxY = WORLD_HEIGHT - ship.radius;
+            
+            // Handle X boundaries
+            if (ship.x < minX) {
+                ship.x = minX;
+                ship.vx = Math.max(0, ship.vx); // Stop leftward velocity
+            } else if (ship.x > maxX) {
+                ship.x = maxX;
+                ship.vx = Math.min(0, ship.vx); // Stop rightward velocity
+            }
+            
+            // Handle Y boundaries
+            if (ship.y < minY) {
+                ship.y = minY;
+                ship.vy = Math.max(0, ship.vy); // Stop upward velocity
+            } else if (ship.y > maxY) {
+                ship.y = maxY;
+                ship.vy = Math.min(0, ship.vy); // Stop downward velocity
+            }
+        }
+        
+        // Bullet boundary handling
+        function handleBulletBoundaries(bullet) {
+            // Remove bullets that exit world boundaries
+            return bullet.x >= 0 && bullet.x <= WORLD_WIDTH && 
+                   bullet.y >= 0 && bullet.y <= WORLD_HEIGHT;
+        }
+        
+        // Weapon firing function
+        function fireWeapon() {
+            if (!myShip.canShoot || !myShipData) return;
+            
+            console.log('🔫 Firing weapon!');
+            
+            // Set cooldown
+            myShip.canShoot = false;
+            myShip.shootingCooldown = 0.25; // 250ms cooldown
+            
+            // Get weapon points (rotated for east-facing)
+            const rotatedShipData = rotateShipData(myShipData);
+            const weaponPoints = rotatedShipData.weaponPoints || [{ x: 15, y: 0 }]; // Default front weapon
+            
+            // Create bullets for each weapon point
+            weaponPoints.forEach((weapon, index) => {
+                // Calculate weapon world position
+                const weaponWorldX = myShip.x + (weapon.x * 0.25) * Math.cos(myShip.angle) - (weapon.y * 0.25) * Math.sin(myShip.angle);
+                const weaponWorldY = myShip.y + (weapon.x * 0.25) * Math.sin(myShip.angle) + (weapon.y * 0.25) * Math.cos(myShip.angle);
+                
+                // Calculate bullet velocity
+                const baseSpeed = weaponPoints.length > 1 ? 4 : 6; // Reduced speed for multiple weapons
+                const bulletVx = Math.cos(myShip.angle) * baseSpeed + myShip.vx;
+                const bulletVy = Math.sin(myShip.angle) * baseSpeed + myShip.vy;
+                
+                const bullet = {
+                    id: myShipId + '_' + Date.now() + '_' + index,
+                    x: weaponWorldX,
+                    y: weaponWorldY,
+                    vx: bulletVx,
+                    vy: bulletVy,
+                    angle: myShip.angle,
+                    ownerId: myShipId,
+                    lifetime: weaponPoints.length > 1 ? 1.0 : 1.5,
+                    maxLifetime: weaponPoints.length > 1 ? 1.0 : 1.5,
+                    weaponCount: weaponPoints.length
+                };
+                
+                bullets.push(bullet);
+                
+                // Broadcast bullet to other players
+                if (socket && socket.connected && currentSession) {
+                    socket.emit('bullet-fired', bullet);
+                }
+            });
+        }
+        
+        // Update bullets
+        function updateBullets() {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                
+                // Update position
+                bullet.x += bullet.vx;
+                bullet.y += bullet.vy;
+                
+                // Gradual slowdown
+                bullet.vx *= 0.99;
+                bullet.vy *= 0.99;
+                
+                // Update lifetime
+                bullet.lifetime -= 1/60;
+                
+                // Remove bullets that exit world boundaries or expire
+                if (bullet.lifetime <= 0 || !handleBulletBoundaries(bullet)) {
+                    bullets.splice(i, 1);
+                }
+            }
+        }
+        
+        // Color normalization function (from ship customizer)
+        function normalizeColor(color) {
+            const colorMap = {
+                'white': '#ffffff',
+                'red': '#ff0000',
+                'green': '#00ff00',
+                'blue': '#0000ff',
+                'yellow': '#ffff00',
+                'cyan': '#00ffff',
+                'magenta': '#ff00ff',
+                'orange': '#ffa500',
+                'purple': '#800080',
+                'pink': '#ffc0cb'
+            };
+            
+            if (colorMap[color]) {
+                return colorMap[color];
+            }
+            
+            // If it's already a hex color, return it
+            if (color && color.startsWith('#')) {
+                return color;
+            }
+            
+            return '#ffffff'; // Default to white
+        }
+
+        // Rotate ship design from north-facing to east-facing
+        function rotateShipData(shipData) {
+            if (!shipData) return shipData;
+            
+            const rotatedData = { ...shipData };
+            
+            // Rotate custom lines by 90 degrees clockwise (north -> east)
+            if (rotatedData.customLines) {
+                rotatedData.customLines = rotatedData.customLines.map(line => {
+                    if (line.startX !== undefined) {
+                        // Object format: rotate coordinates 90° clockwise
+                        // (x, y) -> (-y, x)
+                        return {
+                            ...line,
+                            startX: -line.startY,
+                            startY: line.startX,
+                            endX: -line.endY,
+                            endY: line.endX
+                        };
+                    } else if (Array.isArray(line) && line.length >= 4) {
+                        // Array format: [startX, startY, endX, endY]
+                        return [-line[1], line[0], -line[3], line[2]];
+                    }
+                    return line;
+                });
+            }
+            
+            // Rotate thruster points
+            if (rotatedData.thrusterPoints) {
+                rotatedData.thrusterPoints = rotatedData.thrusterPoints.map(thruster => ({
+                    x: -thruster.y,
+                    y: thruster.x
+                }));
+            }
+            
+            // Rotate weapon points
+            if (rotatedData.weaponPoints) {
+                rotatedData.weaponPoints = rotatedData.weaponPoints.map(weapon => ({
+                    x: -weapon.y,
+                    y: weapon.x
+                }));
+            }
+            
+            return rotatedData;
+        }
+
+        // Draw a custom ship from ship data (based on ship customizer rendering)
+        function drawCustomShip(x, y, angle, shipData, isMyShip) {
+            if (!shipData || !shipData.customLines || shipData.customLines.length === 0) {
+                // Fallback to triangle if no custom data
+                drawTriangleShip(x, y, angle, isMyShip ? '#00ff00' : '#ff4444');
+                return;
+            }
+            
+            // Rotate ship data from north-facing to east-facing
+            const rotatedShipData = rotateShipData(shipData);
+            
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            
+            // Draw custom lines with individual colors and proper scaling
+            ctx.lineWidth = 2;
+            
+            // Draw each custom line individually (like ship customizer does)
+            rotatedShipData.customLines.forEach(line => {
+                // Handle different data formats
+                let startX, startY, endX, endY, lineColor;
+                
+                if (line.startX !== undefined) {
+                    // Object format from ship customizer: {startX, startY, endX, endY, color}
+                    startX = line.startX * 0.25; // Apply 0.25 scale factor
+                    startY = line.startY * 0.25;
+                    endX = line.endX * 0.25;
+                    endY = line.endY * 0.25;
+                    lineColor = line.color || shipData.color || 'white';
+                } else if (Array.isArray(line) && line.length >= 4) {
+                    // Array format: [startX, startY, endX, endY]
+                    startX = line[0] * 0.25;
+                    startY = line[1] * 0.25;
+                    endX = line[2] * 0.25;
+                    endY = line[3] * 0.25;
+                    lineColor = shipData.color || 'white';
+                } else {
+                    return; // Skip invalid line data
+                }
+                
+                // Normalize and apply color
+                ctx.strokeStyle = normalizeColor(lineColor);
+                
+                // For my ship, add green tint; for others, keep original colors
+                if (isMyShip) {
+                    // Keep original colors for my ship but make them slightly green-tinted
+                    if (lineColor === 'white' || lineColor === '#ffffff') {
+                        ctx.strokeStyle = '#00ff88'; // Green-tinted white
+                    }
+                } else {
+                    // For other ships, add red tint to distinguish
+                    if (lineColor === 'white' || lineColor === '#ffffff') {
+                        ctx.strokeStyle = '#ff8888'; // Red-tinted white
+                    }
+                }
+                
+                // Draw the line
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(endX, endY);
+                ctx.stroke();
+            });
+            
+            // Note: Thruster and weapon points are stored but not visually rendered
+            // In the actual game, these are used for game mechanics (thrust effects, bullet spawn points)
+            // but are not drawn as visible circles like in the ship customizer
+            
+            // For debugging only - uncomment to see thruster/weapon points:
+            /*
+            if (rotatedShipData.thrusterPoints && rotatedShipData.thrusterPoints.length > 0) {
+                ctx.fillStyle = 'rgba(0,255,0,0.5)';
+                rotatedShipData.thrusterPoints.forEach(thruster => {
+                    ctx.beginPath();
+                    ctx.arc(thruster.x * 0.25, thruster.y * 0.25, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+            
+            if (rotatedShipData.weaponPoints && rotatedShipData.weaponPoints.length > 0) {
+                ctx.fillStyle = 'rgba(255,255,0,0.5)';
+                rotatedShipData.weaponPoints.forEach(weapon => {
+                    ctx.beginPath();
+                    ctx.arc(weapon.x * 0.25, weapon.y * 0.25, 1, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+            */
+            
+            ctx.restore();
+        }
+        
+        // Draw thruster flames
+        function drawThrusterFlames(x, y, angle, shipData, isThrusting) {
+            if (!isThrusting || !shipData) return;
+            
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            
+            // Get rotated thruster points
+            const rotatedShipData = rotateShipData(shipData);
+            const thrusterPoints = rotatedShipData.thrusterPoints || [{ x: -8, y: 0 }]; // Default rear thruster
+            
+            thrusterPoints.forEach(thruster => {
+                // Random flicker for flame effect
+                const flicker = Math.random() * 0.3 + 0.7;
+                
+                // Flame size and length
+                const thrusterX = thruster.x * 0.25;
+                const thrusterY = thruster.y * 0.25;
+                const flameLength = 12 * flicker;
+                const flameWidth = 6 * flicker;
+                
+                // Create gradient for flame
+                const gradient = ctx.createRadialGradient(
+                    thrusterX, thrusterY, 0,
+                    thrusterX - flameLength, thrusterY, flameWidth
+                );
+                gradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');    // White core
+                gradient.addColorStop(0.3, 'rgba(255, 165, 0, 0.7)');     // Orange
+                gradient.addColorStop(0.8, 'rgba(255, 0, 0, 0.5)');       // Red
+                gradient.addColorStop(1, 'rgba(100, 0, 0, 0)');          // Transparent
+                
+                // Draw flame
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.ellipse(
+                    thrusterX - flameLength/2, thrusterY,
+                    flameLength/2, flameWidth/2,
+                    0, 0, Math.PI * 2
+                );
+                ctx.fill();
+            });
+            
+            ctx.restore();
+        }
+        
+        // Draw bullets
+        function drawBullet(bullet) {
+            const age = 1 - (bullet.lifetime / bullet.maxLifetime);
+            const alpha = Math.max(0.3, 1 - age);
+            
+            ctx.save();
+            
+            // Main bullet
+            ctx.fillStyle = `rgba(255, 255, 0, ${alpha})`;
+            ctx.beginPath();
+            ctx.arc(bullet.x, bullet.y, 2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Bullet trail for fast bullets
+            const speed = Math.sqrt(bullet.vx * bullet.vx + bullet.vy * bullet.vy);
+            if (speed > 3) {
+                const trailLength = Math.min(speed * 2, 10);
+                const gradient = ctx.createLinearGradient(
+                    bullet.x, bullet.y,
+                    bullet.x - bullet.vx * trailLength/speed, bullet.y - bullet.vy * trailLength/speed
+                );
+                gradient.addColorStop(0, `rgba(255, 255, 0, ${alpha * 0.8})`);
+                gradient.addColorStop(1, 'rgba(255, 255, 0, 0)');
+                
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(bullet.x, bullet.y);
+                ctx.lineTo(bullet.x - bullet.vx * trailLength/speed, bullet.y - bullet.vy * trailLength/speed);
+                ctx.stroke();
+            }
+            
+            ctx.restore();
+        }
+        
+        // Fallback triangle ship
+        function drawTriangleShip(x, y, angle, color) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color === '#00ff00' ? 'rgba(0,255,0,0.3)' : 'transparent';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(15, 0);
+            ctx.lineTo(-10, -8);
+            ctx.lineTo(-5, 0);
+            ctx.lineTo(-10, 8);
+            ctx.closePath();
+            ctx.stroke();
+            if (color === '#00ff00') ctx.fill();
+            
+            ctx.restore();
+        }
+        
+        // Draw world boundary (visual indicator)
+        function drawWorldBoundary() {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([10, 10]); // Dashed line
+            ctx.strokeRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+            ctx.setLineDash([]); // Reset dash
+            ctx.restore();
+        }
+        
+        // Send my ship state
+        function broadcastMyShip() {
+            if (socket && socket.connected && currentSession) {
+                socket.emit('player-update', {
+                    x: myShip.x,
+                    y: myShip.y,
+                    angle: myShip.angle,
+                    thrusting: myShip.thrusting,
+                    vx: myShip.vx,
+                    vy: myShip.vy
+                });
+            }
+        }
+        
+        // Main game loop
+        function gameLoop() {
+            // Clear screen
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw world boundary first
+            drawWorldBoundary();
+            
+            // Draw simple starfield (within world bounds)
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            for (let i = 0; i < 100; i++) {
+                const x = (i * 123.45) % WORLD_WIDTH;
+                const y = (i * 678.91) % WORLD_HEIGHT;
+                ctx.beginPath();
+                ctx.arc(x, y, 1, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Update my ship
+            updateMyShip();
+            
+            // Handle ship boundary enforcement for other ships
+            for (const [id, ship] of otherShips) {
+                if (!ship.radius) ship.radius = 12; // Ensure radius is set
+                handleShipBoundaries(ship);
+            }
+            
+            // Update bullets
+            updateBullets();
+            
+            // Draw my ship (green) - use custom design if loaded
+            if (myShipData) {
+                // Draw thruster flames first (behind ship)
+                drawThrusterFlames(myShip.x, myShip.y, myShip.angle, myShipData, myShip.thrusting);
+                
+                drawCustomShip(myShip.x, myShip.y, myShip.angle, myShipData, true);
+                
+                // Draw ship name label
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('YOU', myShip.x, myShip.y - 25);
+            } else {
+                drawTriangleShip(myShip.x, myShip.y, myShip.angle, '#00ff00');
+            }
+            
+            // Draw other ships (red) - use their custom designs
+            for (const [id, ship] of otherShips) {
+                if (ship.shipData) {
+                    // Draw thruster flames first (behind ship)
+                    drawThrusterFlames(ship.x, ship.y, ship.angle, ship.shipData, ship.thrusting);
+                    
+                    drawCustomShip(ship.x, ship.y, ship.angle, ship.shipData, false);
+                } else {
+                    drawTriangleShip(ship.x, ship.y, ship.angle, '#ff4444');
+                }
+                
+                // Draw player ID label
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(id.substr(-4), ship.x, ship.y - 25);
+            }
+            
+            // Draw all bullets
+            bullets.forEach(bullet => {
+                drawBullet(bullet);
+            });
+            
+            // Draw connection status
+            if (!isConnected) {
+                ctx.fillStyle = 'rgba(255,0,0,0.7)';
+                ctx.font = 'bold 24px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('DISCONNECTED', canvas.width / 2, canvas.height / 2);
+            } else if (!currentSession) {
+                ctx.fillStyle = 'rgba(255,255,0,0.7)';
+                ctx.font = 'bold 24px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('NOT IN SESSION', canvas.width / 2, canvas.height / 2);
+            } else if (!myShipData) {
+                ctx.fillStyle = 'rgba(255,165,0,0.7)';
+                ctx.font = 'bold 24px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('LOAD SHIP FIRST', canvas.width / 2, canvas.height / 2);
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start game loop
+        gameLoop();
+        
+        // Broadcast position every 50ms
+        setInterval(() => {
+            broadcastMyShip();
+        }, 50);
+        
+        // Initialize UI
+        updateButtons();
+    </script>
+</body>
+</html>

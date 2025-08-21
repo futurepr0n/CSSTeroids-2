@@ -1,0 +1,513 @@
+/* Global Styles */
+/* /public/css/ship-customizer.css */
+
+body {
+    margin: 0;
+    padding: 0;
+    background-color: #000;
+    color: #fff;
+    font-family: 'Arial', sans-serif;
+    overflow: hidden;
+  }
+  
+  .customization-screen {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+  
+  .header {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  
+  .header h1 {
+    font-size: 28px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin: 0;
+    color: #0ff;
+    text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+  }
+  
+  .main-content {
+    display: flex;
+    flex: 1;
+    gap: 20px;
+  }
+  
+  .design-section {
+    flex: 1.5;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .preview-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .section-title {
+    font-size: 20px;
+    margin-bottom: 15px;
+    color: #0ff;
+    border-bottom: 1px solid #333;
+    padding-bottom: 5px;
+  }
+  
+  .drawing-canvas-container {
+    position: relative;
+    background-color: #000;
+    border: 2px solid #234;
+    border-radius: 8px;
+    width: 400px;
+    height: 400px;
+    margin: 0 auto;
+    overflow: visible; /* Allow pulse effect to overflow */
+  }
+  
+  #drawing-canvas, #customShipCanvas {
+    width: 400px !important;
+    height: 400px !important;
+    display: block !important; /* Ensure canvas is displayed as block */
+    cursor: crosshair;
+  }
+  
+  .preview-container {
+    width: 250px;
+    height: 250px;
+    background-color: #000;
+    border: 2px solid #234;
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 0 20px rgba(0, 30, 60, 0.5) inset;
+    margin-bottom: 20px;
+  }
+  
+  #preview-canvas {
+    width: 100%;
+    height: 100%;
+  }
+  
+  .drawing-controls {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-bottom: 15px;
+  }
+  
+  .button {
+    background-color: #124;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: bold;
+  }
+  
+  .button:hover {
+    background-color: #235;
+    transform: translateY(-2px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+  }
+  
+  .button.clear {
+    background-color: #612;
+  }
+  
+  .button.clear:hover {
+    background-color: #723;
+  }
+  
+  .button.save {
+    background-color: #1a5a3a;
+    padding: 12px 30px;
+    font-size: 16px;
+  }
+  
+  .button.save:hover {
+    background-color: #2a6a4a;
+  }
+  
+  /* Alternative save button styles */
+  #save-new-button {
+    background-color: #1a7a3a;
+  }
+  
+  #save-new-button:hover {
+    background-color: #2a8a4a;
+  }
+  
+  #return-button {
+    background-color: #124;
+  }
+  
+  #return-button:hover {
+    background-color: #235;
+  }
+  
+  .colors-panel {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 15px;
+  }
+  
+  .colors-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+    gap: 10px;
+  }
+  
+  .color-option {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    border: 2px solid #333;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  
+  .color-option:hover {
+    transform: scale(1.1);
+    border-color: #555;
+  }
+  
+  .color-option.selected {
+    border-color: #fff;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+  }
+  
+  /* Custom color picker styles */
+  .custom-color-option {
+    background: linear-gradient(135deg, #ff0000, #ff9900, #ffff00, #00ff00, #00ffff, #0066ff, #9900ff);
+    color: #fff;
+    text-align: center;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .custom-color-text {
+    font-size: 12px;
+    text-shadow: 0 0 3px #000;
+    pointer-events: none;
+  }
+  
+  .color-preview {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    margin-left: 10px;
+  }
+  
+  #custom-color-picker {
+    opacity: 0;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    left: 0;
+    top: 0;
+    cursor: pointer;
+  }
+  
+  .instruction-panel {
+    background-color: rgba(0, 30, 60, 0.3);
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+  }
+  
+  .instruction-panel h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #0ff;
+  }
+  
+  .instruction-panel ul {
+    margin: 0;
+    padding-left: 25px;
+  }
+  
+  .instruction-panel li {
+    margin-bottom: 5px;
+    color: #9ab;
+  }
+  
+  .ship-models {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 15px;
+  }
+  
+  .ship-model {
+    background-color: #112;
+    border: 2px solid #234;
+    border-radius: 6px;
+    padding: 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  
+  .ship-model:hover {
+    background-color: #123;
+    transform: translateY(-2px);
+  }
+  
+  .ship-model.selected {
+    background-color: #124;
+    border-color: #0ff;
+    box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+  }
+  
+  .ship-icon {
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 5px;
+  }
+  
+  .ship-icon svg {
+    height: 100%;
+    width: auto;
+    max-width: 100%;
+  }
+  
+  .ship-name {
+    font-size: 14px;
+    text-transform: uppercase;
+  }
+  
+  .footer {
+    display: flex;
+    justify-content: center;
+    margin-top: 20px;
+    gap: 10px;
+  }
+  
+  /* Mode buttons */
+  .mode-buttons {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 15px;
+    gap: 10px;
+  }
+  
+  /* Animation for point placement */
+  @keyframes pulse {
+    0% { transform: scale(0.8); opacity: 0.8; }
+    50% { transform: scale(1.5); opacity: 0.5; }
+    100% { transform: scale(2.5); opacity: 0; }
+  }
+  
+  .point-pulse {
+    position: absolute;
+    pointer-events: none;
+    animation: pulse 0.5s forwards;
+    z-index: 1000;
+    box-shadow: 0 0 10px 2px currentColor; /* Add glow effect */
+  }
+  
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    background-color: rgba(0, 30, 60, 0.3);
+    border-radius: 4px;
+    padding: 8px 15px;
+    margin-bottom: 10px;
+    font-size: 14px;
+  }
+  
+  .status-message {
+    color: #9ab;
+  }
+  
+  .line-count {
+    color: #0ff;
+    font-weight: bold;
+  }
+  
+  /* Center point indicator */
+  .center-point {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 8px;
+    height: 8px;
+    background-color: rgba(255, 255, 255, 0.5);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+  
+  /* Ship name and code section */
+  .ship-info-section {
+    background-color: rgba(0, 30, 60, 0.3);
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+  }
+  
+  .ship-info-section h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #0ff;
+  }
+  
+  .info-group {
+    margin-bottom: 12px;
+  }
+  
+  .info-group label {
+    display: block;
+    margin-bottom: 5px;
+    color: #9ab;
+  }
+  
+  .info-group input {
+    width: 100%;
+    background-color: #123;
+    border: 1px solid #345;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 4px;
+    box-sizing: border-box;
+    font-size: 14px;
+  }
+  
+  .info-group input:focus {
+    outline: none;
+    border-color: #0ff;
+    box-shadow: 0 0 8px rgba(0, 255, 255, 0.3);
+  }
+  
+  .passphrase-display {
+    background-color: #112;
+    padding: 10px;
+    border-radius: 4px;
+    border: 1px dashed #345;
+    font-family: monospace;
+    font-size: 16px;
+    color: #0ff;
+    text-align: center;
+    margin-top: 10px;
+  }
+  
+  .load-section {
+    margin-top: 15px;
+  }
+  
+  .load-button {
+    margin-top: 10px;
+  }
+  
+  /* Responsive styles */
+  @media (max-width: 992px) {
+    .main-content {
+      flex-direction: column;
+    }
+    
+    .drawing-canvas-container {
+      width: 100%;
+      height: 350px;
+    }
+    
+    .preview-container {
+      width: 200px;
+      height: 200px;
+    }
+  }
+
+  .draw-mode-container {
+    margin-bottom: 15px;
+  }
+  
+  /* Active state for draw mode buttons */
+  .mode-button.active {
+    background-color: #1a5a3a;
+    transform: translateY(-2px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+  }
+  
+  /* Hover state for all mode buttons */
+  .mode-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+  }
+  
+
+  /* Add this CSS to your ship-customizer.css file */
+
+.draw-mode-container {
+  background-color: rgba(0, 30, 60, 0.3);
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 15px;
+}
+
+.draw-mode-container h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #0ff;
+}
+
+.mode-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.mode-button {
+  flex: 1;
+  min-width: 120px;
+  text-align: center;
+  padding: 8px 12px;
+  font-size: 14px;
+  background-color: #124;
+  transition: all 0.2s;
+}
+
+.mode-button:hover {
+  background-color: #235;
+  transform: translateY(-2px);
+}
+
+.mode-button.active {
+  background-color: #1a5a3a;
+  box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+}
+
+#thruster-mode-btn.active {
+  background-color: #c96;
+  color: #000;
+}
+
+#weapon-mode-btn.active {
+  background-color: #c55;
+  color: #000;
+}
+
+/* Add some visual feedback when changing modes */
+@keyframes button-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.mode-button.active {
+  animation: button-pulse 0.3s;
+}

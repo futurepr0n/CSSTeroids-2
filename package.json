@@ -1,0 +1,28 @@
+{
+  "name": "asteroids-ship-customizer",
+  "version": "1.0.0",
+  "description": "Asteroids game with ship customization and MySQL database storage",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "setup": "node setup/init-db.js",
+    "simple": "node server-simple.js"
+  },
+  "dependencies": {
+    "body-parser": "^1.19.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.0",
+    "express": "^4.17.3",
+    "mysql2": "^3.1.0",
+    "sequelize": "^6.28.0",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.15",
+    "sequelize-cli": "^6.6.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

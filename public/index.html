@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Asteroids Game</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Update viewport meta tag for better mobile resolution -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <!-- Add apple-mobile-web-app capable for iOS devices -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div class="game-info">
+        <!--div>Score: <span id="score">0</span></div>
+        <div>Lives: <span id="lives">3</span></div>
+        <div>Level: <span id="level">1</span></div-->
+    </div>
+    <div class="level-message" id="levelMessage">Level <span id="levelNumber">1</span></div>
+    <!--div class="game-over" id="gameOverScreen">
+        <h1>Game Over</h1>
+        <p>Your score: <span id="finalScore">0</span></p>
+        <button id="restartButton">Play Again</button>
+    </div-->
+    
+    <!-- Main Menu Screen -->
+    <div id="mainMenuScreen" class="menu-screen">
+        <div class="menu-container">
+            <h1 class="game-title">ASTEROIDS</h1>
+            <div class="menu-buttons">
+                <button id="startGameButton" class="menu-button">BLAST OFF!</button>
+                <button id="multiplayerButton" class="menu-button">MULTIPLAYER</button>
+                <button id="shipOptionsButton" class="menu-button">SHIP</button>
+                <button id="highScoresButton" class="menu-button">HIGH SCORES</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ship Customization Screen -->
+    <!-- Ship Customization Screen -->
+<!-- Replace the entire shipCustomizationScreen div in index.html with this -->
+<div id="shipCustomizationScreen" class="menu-screen">
+    <div class="menu-container">
+        <h2>DESIGN YOUR SHIP</h2>
+        
+        <div class="ship-captain-section">
+            <label for="playerNameInput">SHIP CAPTAIN:</label>
+            <input type="text" id="playerNameInput" maxlength="15" placeholder="Enter your name">
+        </div>
+        
+        <div class="main-content">
+            <div class="design-section">
+                <div class="status-bar">
+                    <div class="status-message" id="status-message">Click anywhere to start a line</div>
+                    <div class="line-count">Lines: <span id="line-count">0</span></div>
+                </div>
+                
+                <div class="colors-panel">
+                    <div class="colors-grid">
+                        <div class="color-option selected" style="background-color: #ffffff;" data-color="white"></div>
+                        <div class="color-option" style="background-color: #00ffff;" data-color="cyan"></div>
+                        <div class="color-option" style="background-color: #00ff00;" data-color="lime"></div>
+                        <div class="color-option" style="background-color: #ffff00;" data-color="yellow"></div>
+                        <div class="color-option" style="background-color: #ff9900;" data-color="orange"></div>
+                        <div class="color-option" style="background-color: #ff00ff;" data-color="magenta"></div>
+                        <div class="color-option" style="background-color: #ff0000;" data-color="red"></div>
+                        <div class="color-option" style="background-color: #0066ff;" data-color="blue"></div>
+                    </div>
+                </div>
+                
+                <div class="drawing-canvas-container">
+                    <canvas id="customShipCanvas" width="400" height="400"></canvas>
+                    <div class="center-point"></div>
+                </div>
+                
+                <div class="drawing-controls">
+                    <button id="clearCustomShipButton" class="button clear">CLEAR ALL</button>
+                    <button id="undoButton" class="button">UNDO LAST LINE</button>
+                    <button id="finishCustomShipButton" class="button">COMPLETE DESIGN</button>
+                </div>
+                
+                <div class="instruction-panel">
+                    <h3>How to Design Your Ship</h3>
+                    <ul>
+                        <li>Select a color then click to place the first point of a line</li>
+                        <li>Click again to place the second point and create a line</li>
+                        <li>Create multiple lines with different colors for more complex designs</li>
+                        <li>Lines don't need to connect - get creative with your design!</li>
+                        <li>The center point (gray dot) will be your ship's center of rotation</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="preview-section">
+                <h3>SHIP PREVIEW</h3>
+                <div class="ship-preview-container">
+                    <canvas id="shipPreviewCanvas" width="250" height="250"></canvas>
+                </div>
+                
+                <div class="ship-options">
+                    <button class="ship-option" data-ship-type="default">STANDARD</button>
+                    <button class="ship-option" data-ship-type="triangle">TRIANGLE</button>
+                    <button class="ship-option" data-ship-type="diamond">DIAMOND</button>
+                    <button class="ship-option selected" data-ship-type="custom">CUSTOM</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="menu-buttons">
+            <button id="saveShipButton" class="menu-button">SAVE & RETURN</button>
+        </div>
+    </div>
+</div>
+
+    <!-- High Scores Screen -->
+    <div id="highScoresScreen" class="menu-screen">
+        <div class="menu-container">
+            <h2>HIGH SCORES</h2>
+            <div class="high-scores-list" id="highScoresList">
+                <div class="high-score-item loading">Loading scores...</div>
+            </div>
+            <div class="menu-buttons">
+                <button id="backFromHighScoresButton" class="menu-button">BACK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over Screen with High Score Entry -->
+    <div id="gameOverHighScoreScreen" class="menu-screen">
+        <div class="menu-container">
+            <h2>GAME OVER</h2>
+            <p>YOUR SCORE: <span id="finalGameScore">0</span></p>
+            <div class="high-score-entry" id="highScoreEntryForm">
+                <p>NEW HIGH SCORE!</p>
+                <div class="option-group">
+                    <label for="highScoreNameInput">YOUR NAME:</label>
+                    <input type="text" id="highScoreNameInput" maxlength="15" placeholder="Enter your name">
+                </div>
+                <button id="submitScoreButton" class="menu-button">SUBMIT SCORE</button>
+            </div>
+            <div class="menu-buttons">
+                <button id="playAgainButton" class="menu-button">PLAY AGAIN</button>
+                <button id="returnToMenuButton" class="menu-button">MAIN MENU</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multiplayer Lobby Screen -->
+    <div id="multiplayerScreen" class="menu-screen">
+        <div class="menu-container">
+            <h2>MULTIPLAYER LOBBY</h2>
+            
+            <div class="connection-status" id="connectionStatus">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span id="statusText">Connecting...</span>
+            </div>
+            
+            <!-- Ship Loading Section (like custom-ships-minimal.html) -->
+            <div class="ship-loading-section">
+                <h3>LOAD YOUR CUSTOM SHIP</h3>
+                <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                    <input type="text" id="shipPassphraseInput" placeholder="Ship Passphrase (e.g. frozen-arrow-soaring)" maxlength="50" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; background: #333; color: #fff; flex: 1;">
+                    <button id="loadShipButton" class="menu-button">LOAD SHIP</button>
+                </div>
+                <div id="loadedShipInfo" style="display: none; padding: 10px; background: rgba(0,255,0,0.1); border-radius: 4px; font-size: 14px;">
+                    <div><strong>Loaded Ship:</strong> <span id="loadedShipName">-</span></div>
+                    <div>Lines: <span id="loadedShipLines">0</span> | Color: <span id="loadedShipColor">-</span></div>
+                </div>
+            </div>
+            
+            <div class="multiplayer-options">
+                <div class="option-group">
+                    <button id="createSessionButton" class="menu-button">CREATE GAME</button>
+                    <button id="refreshSessionsButton" class="menu-button">REFRESH</button>
+                </div>
+                
+                <div class="join-session-group">
+                    <h3>JOIN BY SESSION ID</h3>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="text" id="sessionIdInput" placeholder="Enter session ID" maxlength="20" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; background: #333; color: #fff;">
+                        <button id="joinSessionButton" class="menu-button">JOIN</button>
+                    </div>
+                </div>
+                
+                <div class="available-sessions">
+                    <h3>AVAILABLE GAMES</h3>
+                    <div class="sessions-list" id="sessionsList">
+                        <div class="session-item loading">Loading available games...</div>
+                    </div>
+                </div>
+                
+                <div class="current-session" id="currentSession" style="display: none;">
+                    <h3>CURRENT SESSION</h3>
+                    <div class="session-info" id="sessionInfo">
+                        <div>Session ID: <span id="currentSessionId">-</span></div>
+                        <div>Players: <span id="currentPlayerCount">0</span>/<span id="maxPlayerCount">3</span></div>
+                        <div>Status: <span id="sessionStatus">Waiting</span></div>
+                    </div>
+                    <div class="players-list" id="playersList">
+                        <h4>Players in Session:</h4>
+                        <div id="playersListContent">No players yet</div>
+                    </div>
+                    <div class="session-controls">
+                        <button id="startMultiplayerGameButton" class="menu-button" style="display: none;">START GAME</button>
+                        <button id="leaveSessionButton" class="menu-button secondary">LEAVE SESSION</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="menu-buttons">
+                <button id="backFromMultiplayerButton" class="menu-button">BACK</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Socket.io client -->
+    <script src="/socket.io/socket.io.js"></script>
+    
+    <!-- Multiplayer modules -->
+    <script src="js/multiplayer/socket-manager.js"></script>
+    <script src="js/multiplayer/session-manager.js"></script>
+    <script src="js/multiplayer/multiplayer-ui.js"></script>
+    
+    <!-- Core modules -->
+    <script src="js/core/utils.js"></script>
+    <script src="js/entities/debris.js"></script>
+    <script src="js/entities/bullet.js"></script>
+    <script src="js/entities/asteroid.js"></script>
+    <script src="js/entities/ship.js"></script>
+    <script src="js/entities/enemy.js"></script>
+    <!--script src="js/core/controls.js"></script-->
+    <script src="js/core/game.js"></script>
+    <script src="js/core/menu.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,525 @@
+// public/js/core/menu.js
+class GameMenu {
+    constructor(game) {
+        this.game = game;
+        
+        // Menu screens
+        this.mainMenuScreen = document.getElementById('mainMenuScreen');
+        this.shipCustomizationScreen = document.getElementById('shipCustomizationScreen');
+        //this.gameOverScreen = document.getElementById('gameOverScreen');
+        this.highScoresScreen = document.getElementById('highScoresScreen');
+        this.gameOverHighScoreScreen = document.getElementById('gameOverHighScoreScreen');
+        
+        // Buttons
+        this.startGameButton = document.getElementById('startGameButton');
+        this.multiplayerButton = document.getElementById('multiplayerButton');
+        this.shipOptionsButton = document.getElementById('shipOptionsButton');
+        this.highScoresButton = document.getElementById('highScoresButton');
+        this.backFromHighScoresButton = document.getElementById('backFromHighScoresButton');
+        this.restartButton = document.getElementById('restartButton');
+        this.returnToMenuButton = document.getElementById('returnToMenuButton');
+        this.submitScoreButton = document.getElementById('submitScoreButton');
+        this.playAgainButton = document.getElementById('playAgainButton');
+        
+        // Elements
+        this.highScoresList = document.getElementById('highScoresList');
+        this.highScoreNameInput = document.getElementById('highScoreNameInput');
+        this.finalGameScore = document.getElementById('finalGameScore');
+        
+        this.initEventListeners();
+        this.showMainMenu();
+    }
+    
+    initEventListeners() {
+        // Main menu buttons
+        if (this.startGameButton) {
+            this.startGameButton.addEventListener('click', () => {
+                this.hideAllScreens();
+                this.game.init();
+            });
+        }
+        
+        if (this.multiplayerButton) {
+            this.multiplayerButton.addEventListener('click', () => {
+                console.log('Multiplayer button clicked - checking multiplayer UI...');
+                if (window.multiplayerUI) {
+                    console.log('Showing multiplayer screen...');
+                    window.multiplayerUI.showMultiplayerScreen();
+                } else {
+                    console.error('Multiplayer UI not available!');
+                    alert('Multiplayer feature is not available. Please refresh the page and try again.');
+                }
+            });
+        }
+        
+        if (this.shipOptionsButton) {
+            this.shipOptionsButton.addEventListener('click', () => {
+                // Redirect to the ship customization page
+                window.location.href = 'ship-customization.html';
+            });
+        }
+        
+        if (this.highScoresButton) {
+            this.highScoresButton.addEventListener('click', () => {
+                this.showHighScores();
+            });
+        }
+        
+        // Back button from high scores
+        if (this.backFromHighScoresButton) {
+            this.backFromHighScoresButton.addEventListener('click', () => {
+                this.showMainMenu();
+            });
+        }
+        
+        // Game over screen
+        if (this.restartButton) {
+            this.restartButton.addEventListener('click', () => {
+                this.hideAllScreens();
+                this.game.init();
+            });
+        }
+        
+        // High score submission screen
+        if (this.submitScoreButton) {
+            this.submitScoreButton.addEventListener('click', () => {
+                this.submitHighScore();
+            });
+        }
+        
+        if (this.playAgainButton) {
+            this.playAgainButton.addEventListener('click', () => {
+                this.hideAllScreens();
+                this.game.init();
+            });
+        }
+        
+        if (this.returnToMenuButton) {
+            this.returnToMenuButton.addEventListener('click', () => {
+                this.showMainMenu();
+            });
+        }
+        
+        // Add demo mode button to ship customization
+        this.addDemoModeButton();
+    }
+    
+    addDemoModeButton() {
+        // Add a button to test the ship in demo mode
+        const shipScreen = document.getElementById('shipCustomizationScreen');
+        const saveButton = document.getElementById('saveShipButton');
+        
+        if (shipScreen && saveButton) {
+            const testButton = document.createElement('button');
+            testButton.id = 'testShipButton';
+            testButton.className = 'menu-button';
+            testButton.textContent = 'TEST FLIGHT';
+            testButton.style.backgroundColor = '#5555aa';
+            testButton.style.marginLeft = '10px';
+            
+            // Insert before save button if possible
+            if (saveButton.parentNode) {
+                saveButton.parentNode.insertBefore(testButton, saveButton.nextSibling);
+                
+                // Add event listener
+                testButton.addEventListener('click', () => {
+                    // Save the current ship design to localStorage first
+                    const saveEvent = new Event('click');
+                    saveButton.dispatchEvent(saveEvent);
+                    
+                    // Redirect to game in demo mode
+                    window.location.href = 'index.html?mode=demo';
+                });
+            }
+        }
+    }
+    
+    hideAllScreens() {
+        // Hide all menu screens
+        if (this.mainMenuScreen) this.mainMenuScreen.style.display = 'none';
+        if (this.shipCustomizationScreen) this.shipCustomizationScreen.style.display = 'none';
+        //if (this.gameOverScreen) this.gameOverScreen.style.display = 'none';
+        if (this.highScoresScreen) this.highScoresScreen.style.display = 'none';
+        if (this.gameOverHighScoreScreen) this.gameOverHighScoreScreen.style.display = 'none';
+        
+        // Hide multiplayer screen if it exists
+        const multiplayerScreen = document.getElementById('multiplayerScreen');
+        if (multiplayerScreen) multiplayerScreen.style.display = 'none';
+        
+        // Show the game canvas when hiding menu screens (game is starting)
+        const gameCanvas = document.getElementById('gameCanvas');
+        if (gameCanvas) gameCanvas.style.display = 'block';
+    }
+    
+    showMainMenu() {
+        this.hideAllScreens();
+        
+        // Hide the game canvas when showing menus
+        const gameCanvas = document.getElementById('gameCanvas');
+        if (gameCanvas) gameCanvas.style.display = 'none';
+        
+        if (this.mainMenuScreen) {
+            this.mainMenuScreen.style.display = 'flex';
+        }
+    }
+    
+    async showHighScores() {
+        // Hide all other screens
+        this.hideAllScreens();
+        
+        // Hide the game canvas when showing menus
+        const gameCanvas = document.getElementById('gameCanvas');
+        if (gameCanvas) gameCanvas.style.display = 'none';
+        
+        // Show the high scores screen
+        if (this.highScoresScreen) {
+            this.highScoresScreen.style.display = 'flex';
+        }
+        
+        // Get the container for scores
+        const highScoresList = document.getElementById('highScoresList');
+        if (!highScoresList) return;
+        
+        // Show loading message
+        highScoresList.innerHTML = '<div class="high-score-item loading">Loading scores...</div>';
+        
+        try {
+            // Fetch high scores from server
+            const response = await fetch('/api/high-scores');
+            
+            if (!response.ok) {
+                throw new Error(`Server error: ${response.status}`);
+            }
+            
+            const scores = await response.json();
+            
+            // Clear the list
+            highScoresList.innerHTML = '';
+            
+            // Check if we have scores
+            if (!scores || scores.length === 0) {
+                highScoresList.innerHTML = '<div class="empty-scores">No high scores yet. Be the first!</div>';
+                return;
+            }
+            
+            // Add header row
+            const headerRow = document.createElement('div');
+            headerRow.className = 'high-score-item header';
+            headerRow.innerHTML = `
+                <div>Rank</div>
+                <div>Pilot</div>
+                <div>Score</div>
+                <div>Ship</div>
+                <div>Date</div>
+            `;
+            highScoresList.appendChild(headerRow);
+            
+            // Add each score row
+            scores.forEach((score, index) => {
+                const row = document.createElement('div');
+                row.className = score.shipPassphrase ? 'high-score-item has-ship' : 'high-score-item';
+                
+                // Format the date
+                const date = new Date(score.date);
+                const formattedDate = `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+                
+                // Create ship preview container
+                const shipContainer = document.createElement('div');
+                shipContainer.className = 'ship-mini-preview';
+                
+                // Create ship preview canvas
+                const shipCanvas = document.createElement('canvas');
+                shipCanvas.width = 60;
+                shipCanvas.height = 60;
+                shipCanvas.className = 'ship-mini-canvas';
+                shipContainer.appendChild(shipCanvas);
+                
+                // Add row content
+                row.innerHTML = `
+                    <div>${index + 1}</div>
+                    <div>${score.name || 'Anonymous'}</div>
+                    <div>${score.score}</div>
+                    <div class="ship-preview-cell"></div>
+                    <div>${formattedDate}</div>
+                `;
+                
+                // Insert ship preview
+                row.querySelector('.ship-preview-cell').appendChild(shipContainer);
+                
+                // Add to list
+                highScoresList.appendChild(row);
+                
+                // Render the ship preview
+                this.renderShipPreview(shipCanvas, score);
+                
+                // Add click handler if there's a ship passphrase
+                if (score.shipPassphrase) {
+                    row.addEventListener('click', () => {
+                        this.loadShipPassphrase(score.shipPassphrase);
+                    });
+                    row.title = 'Click to use this ship';
+                }
+            });
+            
+        } catch (error) {
+            console.error('Failed to load high scores:', error);
+            highScoresList.innerHTML = '<div class="error-message">Failed to load high scores</div>';
+        }
+    }
+    
+    displayHighScores() {
+        if (!this.highScoresList) return;
+        
+        // Clear current list
+        this.highScoresList.innerHTML = '';
+        
+        // Get high scores from localStorage
+        let highScores = localStorage.getItem('asteroids_highScores');
+        
+        if (highScores) {
+            highScores = JSON.parse(highScores);
+            
+            // Create header
+            const header = document.createElement('div');
+            header.className = 'high-score-item header';
+            header.innerHTML = `
+                <div class="rank">Rank</div>
+                <div class="player">Pilot</div>
+                <div class="score">Score</div>
+                <div class="ship-type">Ship</div>
+                <div class="date">Date</div>
+            `;
+            this.highScoresList.appendChild(header);
+            
+            // Add each high score
+            highScores.forEach((score, index) => {
+                const scoreElement = document.createElement('div');
+                scoreElement.className = 'high-score-item';
+                
+                // Format date
+                const date = new Date(score.date);
+                const formattedDate = `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+                
+                // Get ship type display name
+                let shipType = score.ship ? score.ship.type : 'unknown';
+                if (shipType === 'default') shipType = 'Standard';
+                else if (shipType) shipType = shipType.charAt(0).toUpperCase() + shipType.slice(1);
+                
+                scoreElement.innerHTML = `
+                    <div class="rank">${index + 1}</div>
+                    <div class="player">${score.name || 'Anonymous'}</div>
+                    <div class="score">${score.score}</div>
+                    <div class="ship-type">${shipType}</div>
+                    <div class="date">${formattedDate}</div>
+                `;
+                
+                // Add ship passphrase if available
+                if (score.ship && score.ship.passphrase) {
+                    scoreElement.setAttribute('data-passphrase', score.ship.passphrase);
+                    scoreElement.classList.add('has-ship');
+                    scoreElement.title = 'Click to load this ship design';
+                    
+                    // Add click event to load this ship
+                    scoreElement.addEventListener('click', () => {
+                        this.loadShipDesign(score.ship.passphrase);
+                    });
+                }
+                
+                this.highScoresList.appendChild(scoreElement);
+            });
+        } else {
+            // No high scores yet
+            const emptyMessage = document.createElement('div');
+            emptyMessage.className = 'empty-scores';
+            emptyMessage.textContent = 'No high scores yet. Start playing to set some records!';
+            this.highScoresList.appendChild(emptyMessage);
+        }
+    }
+    
+    async submitHighScore() {
+        if (!this.highScoreNameInput) return;
+        
+        const playerName = this.highScoreNameInput.value.trim() || 'Anonymous';
+        const score = parseInt(this.finalGameScore.textContent) || 0;
+        
+        // Get ship information from the current game
+        const shipInfo = this.game.ship ? {
+            shipType: this.game.ship.shipType,
+            shipColor: this.game.ship.color,
+            shipPassphrase: this.game.ship.passphrase || null
+        } : null;
+        
+        try {
+            // Create payload for the API
+            const payload = {
+                name: playerName,
+                score: score,
+                shipType: shipInfo ? shipInfo.shipType : 'default',
+                shipColor: shipInfo ? shipInfo.shipColor : 'white',
+                shipPassphrase: shipInfo ? shipInfo.shipPassphrase : null,
+                date: new Date().toISOString()
+            };
+            
+            console.log('Submitting high score:', payload);
+            
+            // Send score to server
+            const response = await fetch('/api/high-scores', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Server error: ${response.status}`);
+            }
+            
+            // Save player name for future use
+            localStorage.setItem('playerName', playerName);
+            
+            // Show the high scores screen
+            this.showHighScores();
+            
+        } catch (error) {
+            console.error('Failed to submit high score:', error);
+            alert('Failed to save high score. Please try again.');
+        }
+    }
+    
+    loadShipDesign(passphrase) {
+        if (!passphrase) return;
+        
+        // Redirect to ship customizer with the passphrase
+        window.location.href = `ship-customization.html?passphrase=${encodeURIComponent(passphrase)}`;
+    }
+
+    /**
+ * Renders a ship preview on a canvas
+ * @param {HTMLCanvasElement} canvas - The canvas to draw on
+ * @param {Object} scoreData - The score data with ship information
+ */
+renderShipPreview(canvas, scoreData) {
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    
+    // Clear canvas with black background
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, width, height);
+    
+    // Determine ship properties
+    const shipType = scoreData.shipType || 'default';
+    const shipColor = scoreData.shipColor || 'white';
+    
+    // Set drawing style
+    ctx.strokeStyle = shipColor;
+    ctx.lineWidth = 2;
+    
+    // Size for the ship (smaller to fit in preview)
+    const radius = Math.min(width, height) * 0.3;
+    
+    // Draw the appropriate ship type
+    if (shipType === 'custom' && scoreData.shipPassphrase) {
+        // If we have a passphrase, we'll try to load the custom ship
+        this.loadCustomShipForPreview(canvas, scoreData.shipPassphrase);
+    } else if (shipType === 'triangle') {
+        // Draw triangle ship
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY - radius);
+        ctx.lineTo(centerX - radius * 0.8, centerY + radius * 0.8);
+        ctx.lineTo(centerX + radius * 0.8, centerY + radius * 0.8);
+        ctx.closePath();
+        ctx.stroke();
+    } else if (shipType === 'diamond') {
+        // Draw diamond ship
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY - radius);
+        ctx.lineTo(centerX + radius, centerY);
+        ctx.lineTo(centerX, centerY + radius);
+        ctx.lineTo(centerX - radius, centerY);
+        ctx.closePath();
+        ctx.stroke();
+    } else {
+        // Draw default ship
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY - radius);
+        ctx.lineTo(centerX - radius * 0.7, centerY + radius * 0.7);
+        ctx.lineTo(centerX, centerY + radius * 0.4);
+        ctx.lineTo(centerX + radius * 0.7, centerY + radius * 0.7);
+        ctx.closePath();
+        ctx.stroke();
+    }
+}
+
+/**
+ * Loads custom ship data and renders it on the preview canvas
+ * @param {HTMLCanvasElement} canvas - The canvas to draw on
+ * @param {string} passphrase - The ship's passphrase
+ */
+async loadCustomShipForPreview(canvas, passphrase) {
+    try {
+        // Fetch the ship data from server
+        const response = await fetch(`/api/ships/passphrase/${encodeURIComponent(passphrase)}`);
+        
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.status}`);
+        }
+        
+        const shipData = await response.json();
+        
+        // Draw the custom ship lines
+        if (shipData.customLines && shipData.customLines.length > 0) {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const centerX = width / 2;
+            const centerY = height / 2;
+            
+            // Scale factor for the preview (original designs are for 400x400)
+            const scale = Math.min(width, height) / 400;
+            
+            // Draw each line
+            shipData.customLines.forEach(line => {
+                ctx.strokeStyle = line.color || shipData.color || 'white';
+                ctx.lineWidth = 1.5;
+                
+                ctx.beginPath();
+                ctx.moveTo(centerX + line.startX * scale, centerY + line.startY * scale);
+                ctx.lineTo(centerX + line.endX * scale, centerY + line.endY * scale);
+                ctx.stroke();
+                
+                // Draw tiny dots at endpoints
+                ctx.fillStyle = ctx.strokeStyle;
+                ctx.beginPath();
+                ctx.arc(centerX + line.startX * scale, centerY + line.startY * scale, 1, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.arc(centerX + line.endX * scale, centerY + line.endY * scale, 1, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+    } catch (error) {
+        console.error('Failed to load custom ship:', error);
+        // Fall back to rendering a default ship
+        this.renderShipPreview(canvas, { shipType: 'default', shipColor: 'white' });
+    }
+}
+
+/**
+ * Handles clicking on a ship in the high scores list
+ * @param {string} passphrase - The ship's passphrase
+ */
+loadShipPassphrase(passphrase) {
+    // Store the passphrase for later
+    localStorage.setItem('selected_ship_passphrase', passphrase);
+    
+    // Navigate to ship customizer
+    window.location.href = 'ship-customization.html?passphrase=' + encodeURIComponent(passphrase);
+}
+}

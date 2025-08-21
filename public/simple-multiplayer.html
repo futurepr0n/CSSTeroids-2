@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Two-Ship Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+        
+        #gameCanvas {
+            border: 1px solid #333;
+            background: #000;
+        }
+        
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        #controls {
+            margin-top: 10px;
+            font-size: 12px;
+        }
+        
+        button {
+            background: #333;
+            color: white;
+            border: 1px solid #666;
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background: #555;
+        }
+        
+        #sessionInput {
+            background: #333;
+            color: white;
+            border: 1px solid #666;
+            padding: 5px;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <div>Status: <span id="status">Disconnected</span></div>
+        <div>Session: <span id="sessionInfo">None</span></div>
+        <div>Players: <span id="playerCount">0</span></div>
+        <div>Your ID: <span id="playerId">Unknown</span></div>
+        <div>
+            <input type="text" id="sessionInput" placeholder="Enter session ID" value="test123">
+            <button onclick="joinSession()">Join Session</button>
+            <button onclick="testConnection()">Test Connection</button>
+        </div>
+        <div id="controls">
+            Controls: Arrow keys or WASD to move, mouse to rotate
+        </div>
+    </div>
+
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        class SimpleShip {
+            constructor(x, y, isOwnShip = false) {
+                this.x = x;
+                this.y = y;
+                this.angle = 0;
+                this.velocity = { x: 0, y: 0 };
+                this.isOwnShip = isOwnShip;
+                this.color = isOwnShip ? '#00ff00' : '#ff0000';
+                this.size = 10;
+                this.speed = 200; // pixels per second
+                this.rotationSpeed = 3; // radians per second
+                this.friction = 0.98;
+            }
+            
+            update(dt, input = null) {
+                if (this.isOwnShip && input) {
+                    // Handle rotation
+                    if (input.left) this.angle -= this.rotationSpeed * dt;
+                    if (input.right) this.angle += this.rotationSpeed * dt;
+                    
+                    // Handle thrust
+                    if (input.up) {
+                        this.velocity.x += Math.cos(this.angle) * this.speed * dt;
+                        this.velocity.y += Math.sin(this.angle) * this.speed * dt;
+                    }
+                    
+                    // Apply friction
+                    this.velocity.x *= this.friction;
+                    this.velocity.y *= this.friction;
+                }
+                
+                // Update position
+                this.x += this.velocity.x * dt;
+                this.y += this.velocity.y * dt;
+                
+                // Wrap around screen
+                if (this.x < 0) this.x = canvas.width;
+                if (this.x > canvas.width) this.x = 0;
+                if (this.y < 0) this.y = canvas.height;
+                if (this.y > canvas.height) this.y = 0;
+            }
+            
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                
+                // Draw ship as triangle
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(this.size, 0);
+                ctx.lineTo(-this.size, -this.size/2);
+                ctx.lineTo(-this.size, this.size/2);
+                ctx.closePath();
+                ctx.stroke();
+                
+                ctx.restore();
+            }
+            
+            getState() {
+                return {
+                    x: this.x,
+                    y: this.y,
+                    angle: this.angle,
+                    velocity: this.velocity
+                };
+            }
+            
+            setState(state) {
+                this.x = state.x;
+                this.y = state.y;
+                this.angle = state.angle;
+                this.velocity = state.velocity;
+            }
+        }
+
+        // Game setup
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Game state
+        let myShip = new SimpleShip(canvas.width / 2, canvas.height / 2, true);
+        let otherPlayers = new Map();
+        let socket = null;
+        let sessionId = null;
+        let playerId = null;
+        
+        // Input handling
+        const input = {
+            up: false,
+            left: false,
+            right: false
+        };
+        
+        let mouseX = 0;
+        let mouseY = 0;
+        
+        window.addEventListener('keydown', (e) => {
+            switch(e.key.toLowerCase()) {
+                case 'arrowup':
+                case 'w':
+                    input.up = true;
+                    e.preventDefault();
+                    break;
+                case 'arrowleft':
+                case 'a':
+                    input.left = true;
+                    e.preventDefault();
+                    break;
+                case 'arrowright':
+                case 'd':
+                    input.right = true;
+                    e.preventDefault();
+                    break;
+            }
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            switch(e.key.toLowerCase()) {
+                case 'arrowup':
+                case 'w':
+                    input.up = false;
+                    break;
+                case 'arrowleft':
+                case 'a':
+                    input.left = false;
+                    break;
+                case 'arrowright':
+                case 'd':
+                    input.right = false;
+                    break;
+            }
+        });
+        
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = e.clientX - rect.left;
+            mouseY = e.clientY - rect.top;
+            
+            // Update ship angle to point toward mouse
+            const dx = mouseX - myShip.x;
+            const dy = mouseY - myShip.y;
+            myShip.angle = Math.atan2(dy, dx);
+        });
+        
+        // Socket connection
+        function connectSocket() {
+            socket = io();
+            
+            socket.on('connect', () => {
+                console.log('Connected to server');
+                playerId = socket.id;
+                updateStatus('Connected');
+                document.getElementById('playerId').textContent = playerId.substring(0, 8);
+            });
+            
+            socket.on('disconnect', () => {
+                console.log('Disconnected from server');
+                updateStatus('Disconnected');
+                otherPlayers.clear();
+            });
+            
+            socket.on('session-joined', (data) => {
+                console.log('Joined session:', data);
+                sessionId = data.sessionId;
+                updateSessionInfo(data.sessionId, data.playerCount);
+            });
+            
+            socket.on('player-joined', (data) => {
+                console.log('Player joined:', data.playerId);
+                updatePlayerCount();
+            });
+            
+            socket.on('player-left', (data) => {
+                console.log('Player left:', data.playerId);
+                otherPlayers.delete(data.playerId);
+                updatePlayerCount();
+            });
+            
+            socket.on('player-update', (data) => {
+                // Create or update other player
+                if (!otherPlayers.has(data.playerId)) {
+                    otherPlayers.set(data.playerId, new SimpleShip(data.x, data.y, false));
+                }
+                
+                const otherShip = otherPlayers.get(data.playerId);
+                otherShip.setState(data);
+            });
+            
+            socket.on('pong', (data) => {
+                console.log('Pong received:', data);
+            });
+        }
+        
+        function joinSession() {
+            const sessionInput = document.getElementById('sessionInput');
+            const sessionToJoin = sessionInput.value.trim();
+            
+            if (!sessionToJoin) {
+                alert('Please enter a session ID');
+                return;
+            }
+            
+            if (!socket || !socket.connected) {
+                alert('Not connected to server');
+                return;
+            }
+            
+            console.log('Joining session:', sessionToJoin);
+            socket.emit('join-simple-session', sessionToJoin);
+        }
+        
+        function testConnection() {
+            if (socket && socket.connected) {
+                socket.emit('ping');
+            } else {
+                alert('Not connected to server');
+            }
+        }
+        
+        function updateStatus(status) {
+            document.getElementById('status').textContent = status;
+        }
+        
+        function updateSessionInfo(session, playerCount) {
+            document.getElementById('sessionInfo').textContent = session;
+            document.getElementById('playerCount').textContent = playerCount;
+        }
+        
+        function updatePlayerCount() {
+            const currentCount = otherPlayers.size + (sessionId ? 1 : 0);
+            document.getElementById('playerCount').textContent = currentCount;
+        }
+        
+        // Game loop
+        let lastTime = 0;
+        let lastSyncTime = 0;
+        const syncInterval = 1000 / 20; // 20 FPS sync
+        
+        function gameLoop(timestamp) {
+            const dt = (timestamp - lastTime) / 1000;
+            lastTime = timestamp;
+            
+            // Update my ship
+            myShip.update(dt, input);
+            
+            // Update other players (they handle their own movement)
+            for (const [id, ship] of otherPlayers) {
+                ship.update(dt);
+            }
+            
+            // Send my state to other players
+            if (socket && socket.connected && sessionId && timestamp - lastSyncTime > syncInterval) {
+                socket.emit('player-update', myShip.getState());
+                lastSyncTime = timestamp;
+            }
+            
+            // Render
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw my ship
+            myShip.draw(ctx);
+            
+            // Draw other players
+            for (const [id, ship] of otherPlayers) {
+                ship.draw(ctx);
+                
+                // Draw player ID above ship
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(id.substring(0, 8), ship.x, ship.y - 20);
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start everything
+        connectSocket();
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>

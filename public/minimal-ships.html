@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Minimal Two Ships Test</title>
+    <style>
+        body { margin: 0; background: #000; color: white; font-family: Arial; }
+        canvas { background: #000; display: block; }
+        #info { position: absolute; top: 10px; left: 10px; }
+        button { padding: 10px; margin: 5px; background: #333; color: white; border: 1px solid #666; }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <div>Status: <span id="status">Disconnected</span></div>
+        <div>My ID: <span id="myId">None</span></div>
+        <div>Other Ships: <span id="otherCount">0</span></div>
+        <button onclick="connect()">Connect & Join Room</button>
+        <div>Use arrow keys to move your ship</div>
+    </div>
+    
+    <canvas id="canvas" width="800" height="600"></canvas>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // My ship
+        let myShip = {
+            x: 400,
+            y: 300,
+            vx: 0,
+            vy: 0,
+            angle: 0
+        };
+        
+        // Other ships
+        let otherShips = {};
+        
+        let socket = null;
+        let myId = null;
+        
+        // Input
+        const keys = {};
+        
+        // Connect to server and join room
+        function connect() {
+            const serverUrl = `${window.location.protocol}//${window.location.hostname}:6161`;
+            console.log('Connecting to server at:', serverUrl);
+            socket = io(serverUrl);
+            
+            socket.on('connect', () => {
+                myId = socket.id;
+                document.getElementById('status').textContent = 'Connected';
+                document.getElementById('myId').textContent = myId.substr(-6);
+                
+                // Join the test room
+                socket.emit('join-simple-session', 'testroom');
+                console.log('Joined room: testroom');
+            });
+            
+            socket.on('disconnect', () => {
+                document.getElementById('status').textContent = 'Disconnected';
+                otherShips = {};
+            });
+            
+            socket.on('session-joined', (data) => {
+                console.log('Session joined:', data);
+            });
+            
+            socket.on('player-update', (data) => {
+                if (data.playerId !== myId) {
+                    otherShips[data.playerId] = {
+                        x: data.x,
+                        y: data.y,
+                        angle: data.angle
+                    };
+                    updateShipCount();
+                }
+            });
+            
+            socket.on('player-left', (data) => {
+                delete otherShips[data.playerId];
+                updateShipCount();
+            });
+        }
+        
+        function updateShipCount() {
+            document.getElementById('otherCount').textContent = Object.keys(otherShips).length;
+        }
+        
+        // Input handling
+        window.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+        
+        // Update my ship
+        function updateMyShip() {
+            // Simple movement
+            if (keys['ArrowUp']) {
+                myShip.vx += Math.cos(myShip.angle) * 0.5;
+                myShip.vy += Math.sin(myShip.angle) * 0.5;
+            }
+            if (keys['ArrowLeft']) {
+                myShip.angle -= 0.1;
+            }
+            if (keys['ArrowRight']) {
+                myShip.angle += 0.1;
+            }
+            
+            // Apply friction
+            myShip.vx *= 0.98;
+            myShip.vy *= 0.98;
+            
+            // Update position
+            myShip.x += myShip.vx;
+            myShip.y += myShip.vy;
+            
+            // Keep on screen
+            if (myShip.x < 0) myShip.x = canvas.width;
+            if (myShip.x > canvas.width) myShip.x = 0;
+            if (myShip.y < 0) myShip.y = canvas.height;
+            if (myShip.y > canvas.height) myShip.y = 0;
+        }
+        
+        // Draw a ship
+        function drawShip(x, y, angle, color) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(15, 0);
+            ctx.lineTo(-10, -8);
+            ctx.lineTo(-5, 0);
+            ctx.lineTo(-10, 8);
+            ctx.closePath();
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+        
+        // Send my ship state
+        function broadcastMyShip() {
+            if (socket && socket.connected) {
+                socket.emit('player-update', {
+                    x: myShip.x,
+                    y: myShip.y,
+                    angle: myShip.angle
+                });
+            }
+        }
+        
+        // Main game loop
+        function gameLoop() {
+            // Clear screen
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Update my ship
+            updateMyShip();
+            
+            // Draw my ship (green)
+            drawShip(myShip.x, myShip.y, myShip.angle, '#00ff00');
+            
+            // Draw other ships (red)
+            for (const id in otherShips) {
+                const ship = otherShips[id];
+                drawShip(ship.x, ship.y, ship.angle, '#ff0000');
+                
+                // Draw ID above ship
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(id.substr(-6), ship.x, ship.y - 20);
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start game loop
+        gameLoop();
+        
+        // Broadcast my position every 50ms
+        setInterval(() => {
+            broadcastMyShip();
+        }, 50);
+    </script>
+</body>
+</html>

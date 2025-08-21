@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create Test Ship</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: #000; 
+            color: white; 
+            font-family: Arial; 
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255,255,255,0.1);
+            padding: 20px;
+            border-radius: 10px;
+        }
+        input, textarea, button {
+            padding: 10px;
+            margin: 5px;
+            background: #333;
+            color: white;
+            border: 1px solid #666;
+            border-radius: 3px;
+            width: 200px;
+        }
+        button {
+            background: #006600;
+            cursor: pointer;
+            width: auto;
+            padding: 10px 20px;
+        }
+        button:hover { background: #008800; }
+        .ship-preview {
+            width: 300px;
+            height: 300px;
+            border: 1px solid #666;
+            background: #111;
+            margin: 10px 0;
+        }
+        .result {
+            margin: 10px 0;
+            padding: 10px;
+            background: rgba(0,255,0,0.2);
+            border-radius: 5px;
+            display: none;
+        }
+        .error {
+            background: rgba(255,0,0,0.2);
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Create Test Ship for Multiplayer</h1>
+        <p>Create simple test ships to test the multiplayer system</p>
+        
+        <form id="shipForm">
+            <label>Ship Name:</label>
+            <input type="text" id="shipName" value="Test Fighter" required>
+            
+            <label>Ship Color:</label>
+            <select id="shipColor" style="background: #333; color: white; padding: 10px; border: 1px solid #666;">
+                <option value="white">White</option>
+                <option value="red">Red</option>
+                <option value="green">Green</option>
+                <option value="blue">Blue</option>
+                <option value="yellow">Yellow</option>
+                <option value="cyan">Cyan</option>
+                <option value="magenta">Magenta</option>
+                <option value="orange">Orange</option>
+                <option value="purple">Purple</option>
+            </select>
+            
+            <label>Ship Type:</label>
+            <select id="shipType" style="background: #333; color: white; padding: 10px; border: 1px solid #666;">
+                <option value="custom">Custom</option>
+                <option value="triangle">Triangle</option>
+                <option value="diamond">Diamond</option>
+            </select>
+            
+            <label>Custom Passphrase (leave empty to auto-generate):</label>
+            <input type="text" id="customPassphrase" placeholder="e.g., my-cool-ship-123">
+            
+            <br><br>
+            <button type="button" onclick="createTriangleShip()">Create Triangle Ship</button>
+            <button type="button" onclick="createDiamondShip()">Create Diamond Ship</button>
+            <button type="button" onclick="createArrowShip()">Create Arrow Ship</button>
+            <br><br>
+            <button type="button" onclick="saveShip()">Save Ship</button>
+        </form>
+        
+        <canvas id="preview" class="ship-preview" width="300" height="300"></canvas>
+        
+        <div id="result" class="result"></div>
+        
+        <div style="margin-top: 20px;">
+            <h3>Recent Ships Created:</h3>
+            <div id="recentShips"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentShipData = null;
+        const canvas = document.getElementById('preview');
+        const ctx = canvas.getContext('2d');
+        
+        // Create different ship designs
+        function createTriangleShip() {
+            currentShipData = {
+                name: document.getElementById('shipName').value,
+                type: 'custom',
+                color: document.getElementById('shipColor').value,
+                customLines: [
+                    { startX: 60, startY: 0, endX: -40, endY: -30, color: 'white' },
+                    { startX: -40, startY: -30, endX: -20, endY: 0, color: 'white' },
+                    { startX: -20, startY: 0, endX: -40, endY: 30, color: 'white' },
+                    { startX: -40, startY: 30, endX: 60, endY: 0, color: 'white' }
+                ],
+                thrusterPoints: [
+                    { x: -30, y: 0 }
+                ],
+                weaponPoints: [
+                    { x: 60, y: 0 }
+                ]
+            };
+            drawPreview();
+        }
+        
+        function createDiamondShip() {
+            currentShipData = {
+                name: document.getElementById('shipName').value,
+                type: 'custom',
+                color: document.getElementById('shipColor').value,
+                customLines: [
+                    { startX: 40, startY: 0, endX: 0, endY: -25, color: 'white' },
+                    { startX: 0, startY: -25, endX: -40, endY: 0, color: 'white' },
+                    { startX: -40, startY: 0, endX: 0, endY: 25, color: 'white' },
+                    { startX: 0, startY: 25, endX: 40, endY: 0, color: 'white' }
+                ],
+                thrusterPoints: [
+                    { x: -35, y: 0 }
+                ],
+                weaponPoints: [
+                    { x: 40, y: 0 }
+                ]
+            };
+            drawPreview();
+        }
+        
+        function createArrowShip() {
+            currentShipData = {
+                name: document.getElementById('shipName').value,
+                type: 'custom',
+                color: document.getElementById('shipColor').value,
+                customLines: [
+                    { startX: 50, startY: 0, endX: 10, endY: -20, color: 'white' },
+                    { startX: 10, startY: -20, endX: -30, endY: -15, color: 'white' },
+                    { startX: -30, startY: -15, endX: -40, endY: -5, color: 'white' },
+                    { startX: -40, startY: -5, endX: -40, endY: 5, color: 'white' },
+                    { startX: -40, startY: 5, endX: -30, endY: 15, color: 'white' },
+                    { startX: -30, startY: 15, endX: 10, endY: 20, color: 'white' },
+                    { startX: 10, startY: 20, endX: 50, endY: 0, color: 'white' }
+                ],
+                thrusterPoints: [
+                    { x: -35, y: -3 },
+                    { x: -35, y: 3 }
+                ],
+                weaponPoints: [
+                    { x: 50, y: 0 }
+                ]
+            };
+            drawPreview();
+        }
+        
+        function drawPreview() {
+            if (!currentShipData) return;
+            
+            // Clear canvas
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw ship centered
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            
+            // Draw custom lines
+            ctx.strokeStyle = currentShipData.color;
+            ctx.lineWidth = 2;
+            
+            currentShipData.customLines.forEach(line => {
+                ctx.beginPath();
+                ctx.moveTo(line.startX * 2, line.startY * 2); // Scale up for preview
+                ctx.lineTo(line.endX * 2, line.endY * 2);
+                ctx.stroke();
+            });
+            
+            // Draw thruster points
+            ctx.fillStyle = '#00ff00';
+            if (currentShipData.thrusterPoints) {
+                currentShipData.thrusterPoints.forEach(thruster => {
+                    ctx.beginPath();
+                    ctx.arc(thruster.x * 2, thruster.y * 2, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+            
+            // Draw weapon points
+            ctx.fillStyle = '#ff0000';
+            if (currentShipData.weaponPoints) {
+                currentShipData.weaponPoints.forEach(weapon => {
+                    ctx.beginPath();
+                    ctx.arc(weapon.x * 2, weapon.y * 2, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+            
+            ctx.restore();
+        }
+        
+        async function saveShip() {
+            if (!currentShipData) {
+                alert('Please create a ship design first');
+                return;
+            }
+            
+            // Update ship data with current form values
+            currentShipData.name = document.getElementById('shipName').value;
+            currentShipData.color = document.getElementById('shipColor').value;
+            currentShipData.type = document.getElementById('shipType').value;
+            
+            // Add custom passphrase if provided
+            const customPassphrase = document.getElementById('customPassphrase').value.trim();
+            if (customPassphrase) {
+                currentShipData.passphrase = customPassphrase;
+            }
+            
+            const resultDiv = document.getElementById('result');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result';
+            resultDiv.textContent = 'Saving ship...';
+            
+            try {
+                console.log('Saving ship data:', currentShipData);
+                
+                const response = await fetch('/api/ships', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(currentShipData)
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to save ship');
+                }
+                
+                const savedShip = await response.json();
+                console.log('Ship saved successfully:', savedShip);
+                
+                resultDiv.innerHTML = `
+                    <strong>Ship saved successfully!</strong><br>
+                    Name: ${savedShip.name}<br>
+                    Passphrase: <strong>${savedShip.passphrase}</strong><br>
+                    Color: ${savedShip.color}<br>
+                    Lines: ${savedShip.customLines.length}<br>
+                    <br>
+                    <em>Use this passphrase in the multiplayer test: ${savedShip.passphrase}</em>
+                `;
+                
+                // Add to recent ships
+                addToRecentShips(savedShip);
+                
+            } catch (error) {
+                console.error('Error saving ship:', error);
+                resultDiv.className = 'result error';
+                resultDiv.textContent = 'Error saving ship: ' + error.message;
+            }
+        }
+        
+        function addToRecentShips(ship) {
+            const recentDiv = document.getElementById('recentShips');
+            const shipDiv = document.createElement('div');
+            shipDiv.style.cssText = 'margin: 5px 0; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;';
+            shipDiv.innerHTML = `
+                <strong>${ship.name}</strong> (${ship.color})<br>
+                Passphrase: <code style="background: #333; padding: 2px 5px; border-radius: 3px;">${ship.passphrase}</code><br>
+                Lines: ${ship.customLines.length} | Thrusters: ${ship.thrusterPoints.length} | Weapons: ${ship.weaponPoints.length}
+            `;
+            recentDiv.insertBefore(shipDiv, recentDiv.firstChild);
+        }
+        
+        // Create initial triangle ship
+        createTriangleShip();
+    </script>
+</body>
+</html>

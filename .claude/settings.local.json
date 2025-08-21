@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(npm run setup:*)",
+      "Bash(npm start)",
+      "Bash(grep:*)",
+      "Bash(pkill:*)",
+      "Bash(rg:*)",
+      "Bash(curl:*)",
+      "Bash(echo)",
+      "Bash(lsof:*)",
+      "Bash(timeout:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(node:*)",
+      "Bash(brew services start:*)",
+      "Bash(sudo brew services start:*)",
+      "Bash(open:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": []
+  }
+}

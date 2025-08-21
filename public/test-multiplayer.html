@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Multiplayer Connection Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #000; color: #fff; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #4CAF50; }
+        .error { background: #f44336; }
+        .warning { background: #ff9800; }
+        .info { background: #2196F3; }
+        button { padding: 10px 20px; margin: 5px; background: #555; color: #fff; border: none; cursor: pointer; }
+        button:hover { background: #777; }
+        #log { background: #222; padding: 10px; height: 300px; overflow-y: scroll; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <h1>CSSTeroids Multiplayer Connection Test</h1>
+    
+    <div id="status" class="status info">Initializing...</div>
+    
+    <div>
+        <button onclick="testConnection()">Test Connection</button>
+        <button onclick="createTestSession()">Create Test Session</button>
+        <button onclick="joinTestSession()">Join Test Session</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+    
+    <div id="log"></div>
+    
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        let socket = null;
+        let testSessionId = 'testroom';
+        
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `<div style="color: ${type === 'error' ? '#ff6b6b' : type === 'success' ? '#51cf66' : '#339af0'}">[${timestamp}] ${message}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+        
+        function testConnection() {
+            log('Testing connection to server...', 'info');
+            
+            try {
+                if (typeof io === 'undefined') {
+                    log('ERROR: Socket.io not loaded!', 'error');
+                    updateStatus('Socket.io not available', 'error');
+                    return;
+                }
+                
+                log('Socket.io is available, creating connection...', 'success');
+                
+                const serverUrl = `${window.location.protocol}//${window.location.hostname}:6161`;
+                console.log('Connecting to server at:', serverUrl);
+                
+                socket = io(serverUrl, {
+                    transports: ['websocket', 'polling'],
+                    upgrade: true,
+                    forceNew: true,
+                    reconnection: true,
+                    reconnectionAttempts: 5,
+                    reconnectionDelay: 1000,
+                    timeout: 5000
+                });
+                
+                socket.on('connect', () => {
+                    log(`✅ Connected to server! Socket ID: ${socket.id}`, 'success');
+                    updateStatus('Connected to server', 'success');
+                });
+                
+                socket.on('disconnect', (reason) => {
+                    log(`❌ Disconnected from server: ${reason}`, 'error');
+                    updateStatus('Disconnected from server', 'error');
+                });
+                
+                socket.on('connect_error', (error) => {
+                    log(`❌ Connection error: ${error.message}`, 'error');
+                    updateStatus('Connection failed', 'error');
+                });
+                
+                socket.on('session-joined', (data) => {
+                    log(`✅ Session joined: ${JSON.stringify(data)}`, 'success');
+                });
+                
+                socket.on('player-joined', (data) => {
+                    log(`👤 Player joined: ${JSON.stringify(data)}`, 'info');
+                });
+                
+                socket.on('player-update', (data) => {
+                    log(`🎮 Player update: ${data.playerId} at (${data.x}, ${data.y})`, 'info');
+                });
+                
+            } catch (error) {
+                log(`❌ Error creating connection: ${error.message}`, 'error');
+                updateStatus('Connection setup failed', 'error');
+            }
+        }
+        
+        function createTestSession() {
+            if (!socket || !socket.connected) {
+                log('❌ Not connected to server. Test connection first.', 'error');
+                return;
+            }
+            
+            log(`Creating test session: ${testSessionId}`, 'info');
+            socket.emit('join-simple-session', testSessionId);
+        }
+        
+        function joinTestSession() {
+            if (!socket || !socket.connected) {
+                log('❌ Not connected to server. Test connection first.', 'error');
+                return;
+            }
+            
+            log(`Joining test session: ${testSessionId}`, 'info');
+            socket.emit('join-simple-session', testSessionId);
+            
+            // Test sending player updates
+            setInterval(() => {
+                if (socket && socket.connected) {
+                    const testData = {
+                        x: Math.random() * 100,
+                        y: Math.random() * 100,
+                        angle: Math.random() * Math.PI * 2,
+                        velocity: { x: 0, y: 0 },
+                        thrusting: false,
+                        alive: true,
+                        playerName: 'TestPlayer'
+                    };
+                    socket.emit('player-update', testData);
+                }
+            }, 1000);
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        // Auto-test on load
+        window.addEventListener('load', () => {
+            log('Page loaded, Socket.io available: ' + (typeof io !== 'undefined'), 'info');
+            setTimeout(testConnection, 500);
+        });
+    </script>
+</body>
+</html>

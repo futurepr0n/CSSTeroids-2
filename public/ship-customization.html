@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Line-Based Ship Customization</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <link rel="stylesheet" href="css/ship-customizer.css">
+  <style>
+    /* Mobile optimizations */
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #000;
+      color: #fff;
+      font-family: 'Arial', sans-serif;
+      -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+      overflow-y: auto; /* Enable vertical scrolling */
+      touch-action: pan-y; /* Allow vertical panning */
+    }
+
+    .customization-screen {
+      display: flex;
+      flex-direction: column;
+      height: auto; /* Remove fixed height to enable scrolling */
+      min-height: 100vh;
+      padding: 15px;
+      box-sizing: border-box;
+      overflow-y: visible; /* Enable vertical scrolling */
+    }
+
+    .main-content {
+      display: flex;
+      flex-direction: column; /* Always stack on mobile */
+      width: 100%;
+    }
+
+    .drawing-canvas-container {
+      position: relative;
+      width: 100%; /* Full width on mobile */
+      max-width: 400px;
+      height: auto;
+      aspect-ratio: 1/1; /* Maintain square aspect ratio */
+      margin: 0 auto 15px;
+      touch-action: none; /* Disable browser handling of all touch events */
+    }
+
+    #drawing-canvas {
+      width: 100% !important;
+      height: 100% !important;
+      touch-action: none;
+    }
+
+    /* Larger touch targets */
+    .button, .color-option, .ship-model, .mode-button {
+      min-height: 44px; /* Apple's recommended minimum touch target size */
+      min-width: 44px;
+    }
+
+    .colors-grid {
+      grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+      gap: 8px;
+    }
+
+    .mode-buttons {
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .mode-button {
+      flex: 1 0 40%; /* More appropriate sizing for buttons on mobile */
+      padding: 12px 15px;
+      font-size: 14px;
+    }
+
+    .preview-container {
+      width: 100%;
+      max-width: 250px;
+      height: auto;
+      aspect-ratio: 1/1;
+      margin: 0 auto 15px;
+    }
+
+    .drawing-controls {
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .footer {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 20px;
+      padding-bottom: 20px;
+    }
+
+    .footer .button {
+      width: 100%;
+      padding: 15px;
+      margin-bottom: 10px;
+    }
+
+    /* Toast notification for mobile */
+    .toast-notification {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 20px;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .toast-notification.show {
+      opacity: 1;
+    }
+
+    /* Touch indicator */
+    .touch-indicator {
+      position: absolute;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background-color: rgba(0, 255, 255, 0.3);
+      border: 2px solid cyan;
+      pointer-events: none;
+      transform: translate(-50%, -50%);
+      z-index: 100;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    /* Line preview when touching */
+    .touch-preview-line {
+      position: absolute;
+      background-color: rgba(255, 255, 255, 0.5);
+      height: 2px;
+      transform-origin: left center;
+      pointer-events: none;
+      z-index: 99;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="customization-screen">
+    <div class="header">
+      <h1>Design Your Ship</h1>
+    </div>
+    
+    <div class="main-content">
+      <div class="design-section">
+        <h2 class="section-title">CREATE YOUR DESIGN</h2>
+        
+        <div class="ship-info-section">
+          <h3>Ship Information</h3>
+          <div class="info-group">
+            <label for="ship-name">Ship Name:</label>
+            <input type="text" id="ship-name" placeholder="Enter a name for your ship" maxlength="30">
+          </div>
+          
+          <div id="saved-ship-container" style="display: none;">
+            <div class="info-group">
+              <label>Ship Passphrase:</label>
+              <div class="passphrase-display" id="ship-passphrase">-</div>
+            </div>
+          </div>
+          
+          <div class="load-section">
+            <div class="info-group">
+              <label for="load-passphrase">Load Ship by Passphrase:</label>
+              <input type="text" id="load-passphrase" placeholder="Enter 3-word passphrase to load">
+            </div>
+            <button class="button load-button" id="load-button">LOAD DESIGN</button>
+          </div>
+        </div>
+
+        <!-- Drawing Mode Selection -->
+        <div class="mode-selection">
+          <div class="status-bar">
+            <div class="status-message" id="status-message">Click anywhere to start a line</div>
+            <div class="line-count">Lines: <span id="line-count">0</span></div>
+          </div>
+          
+          <!-- Functionality Mode Buttons -->
+          <div class="draw-mode-container">
+            <h3>Drawing Mode</h3>
+            <div class="mode-buttons">
+              <button id="design-mode-btn" class="button mode-button active">DESIGN</button>
+              <button id="thruster-mode-btn" class="button mode-button">THRUSTERS (0/3)</button>
+              <button id="weapon-mode-btn" class="button mode-button">WEAPONS (0/2)</button>
+            </div>
+            
+            <div class="mode-buttons">
+              <button id="freehand-mode-btn" class="button mode-button active">FREEHAND</button>
+              <button id="mirror-mode-btn" class="button mode-button">MIRROR</button>
+              <button id="snap-mode-btn" class="button mode-button">SNAP TO GRID</button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="colors-panel">
+          <div class="colors-grid">
+            <div class="color-option selected" style="background-color: #ffffff;" data-color="white"></div>
+            <div class="color-option" style="background-color: #00ffff;" data-color="cyan"></div>
+            <div class="color-option" style="background-color: #00ff00;" data-color="lime"></div>
+            <div class="color-option" style="background-color: #ffff00;" data-color="yellow"></div>
+            <div class="color-option" style="background-color: #ff9900;" data-color="orange"></div>
+            <div class="color-option" style="background-color: #ff00ff;" data-color="magenta"></div>
+            <div class="color-option" style="background-color: #ff0000;" data-color="red"></div>
+            <div class="color-option" style="background-color: #0066ff;" data-color="blue"></div>
+            <div class="color-option custom-color-option" data-color="custom">
+              <span class="custom-color-text">Custom</span>
+              <input type="color" id="custom-color-picker" value="#ffffff">
+            </div>
+          </div>
+        </div>
+        
+        <div class="drawing-canvas-container">
+          <canvas id="drawing-canvas"></canvas>
+          <div class="center-point"></div>
+          <div class="touch-indicator"></div>
+        </div>
+        
+        <div class="drawing-controls">
+          <button class="button clear" id="clear-button">CLEAR ALL</button>
+          <button class="button" id="undo-button">UNDO LAST</button>
+          <button class="button" id="complete-button">COMPLETE</button>
+        </div>
+      </div>
+      
+      <div class="preview-section">
+        <h2 class="section-title">SHIP PREVIEW</h2>
+        
+        <div class="preview-container">
+          <canvas id="preview-canvas"></canvas>
+        </div>
+        
+        <div class="ship-models">
+          <div class="ship-model" data-type="default">
+            <div class="ship-icon">
+              <svg viewBox="0 0 100 100" fill="none" stroke="white" stroke-width="2">
+                <path d="M50,20 L20,80 L50,65 L80,80 Z"></path>
+              </svg>
+            </div>
+            <div class="ship-name">Standard</div>
+          </div>
+          
+          <div class="ship-model" data-type="triangle">
+            <div class="ship-icon">
+              <svg viewBox="0 0 100 100" fill="none" stroke="white" stroke-width="2">
+                <path d="M50,20 L20,80 L80,80 Z"></path>
+              </svg>
+            </div>
+            <div class="ship-name">Triangle</div>
+          </div>
+          
+          <div class="ship-model" data-type="diamond">
+            <div class="ship-icon">
+              <svg viewBox="0 0 100 100" fill="none" stroke="white" stroke-width="2">
+                <path d="M50,20 L80,50 L50,80 L20,50 Z"></path>
+              </svg>
+            </div>
+            <div class="ship-name">Diamond</div>
+          </div>
+          
+          <div class="ship-model selected" data-type="custom">
+            <div class="ship-icon">
+              <svg viewBox="0 0 100 100" fill="none" stroke="white" stroke-width="2">
+                <path d="M30,30 L50,20 L70,30 M20,60 L40,50 M60,50 L80,60" stroke-linecap="round"></path>
+              </svg>
+            </div>
+            <div class="ship-name">Custom</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="footer">
+      <button class="button save" id="save-button">UPDATE DESIGN</button>
+      <button class="button save" id="save-new-button">SAVE AS NEW SHIP</button>
+      <button class="button save" id="return-button">RETURN TO GAME</button>
+    </div>
+  </div>
+  
+  <!-- Toast notification for mobile feedback -->
+  <div class="toast-notification" id="toast-notification"></div>
+  
+  <!-- Load JavaScript modules -->
+  <script type="module" src="js/ship-customizer/main.js"></script>
+  <script type="module" src="js/ship-customizer/mobile-touch.js"></script>
+</body>
+</html>

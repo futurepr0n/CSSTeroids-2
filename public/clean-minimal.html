@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clean Minimal Two Ships</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: #000; 
+            color: white; 
+            font-family: Arial; 
+            overflow: hidden;
+        }
+        canvas { 
+            background: #000; 
+            display: block; 
+        }
+        #ui { 
+            position: absolute; 
+            top: 10px; 
+            left: 10px; 
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        button { 
+            padding: 10px 15px; 
+            margin: 5px; 
+            background: #333; 
+            color: white; 
+            border: 1px solid #666; 
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover { background: #555; }
+        button:disabled { background: #222; cursor: not-allowed; }
+        input {
+            padding: 8px;
+            background: #333;
+            color: white;
+            border: 1px solid #666;
+            border-radius: 3px;
+            margin: 5px;
+        }
+        .status { margin: 5px 0; }
+        .connected { color: #0f0; }
+        .disconnected { color: #f00; }
+        .waiting { color: #ff0; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h3>Clean Minimal Multiplayer Test</h3>
+        <div class="status">Status: <span id="status" class="disconnected">Disconnected</span></div>
+        <div class="status">Session: <span id="sessionDisplay">None</span></div>
+        <div class="status">My Ship: <span id="myShipId">None</span></div>
+        <div class="status">Other Ships: <span id="otherShipCount">0</span></div>
+        <div class="status">Room Size: <span id="roomSize">0</span></div>
+        
+        <div>
+            <input type="text" id="sessionInput" placeholder="Session ID" value="clean-test-123">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+        
+        <div style="margin-top: 10px; font-size: 12px;">
+            <div>Arrow Keys: Move your ship</div>
+            <div>Green ship = You, Red ships = Others</div>
+        </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Canvas setup
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Game state
+        let socket = null;
+        let myShipId = null;
+        let currentSession = null;
+        let isConnected = false;
+        
+        // My ship
+        let myShip = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            vx: 0,
+            vy: 0,
+            angle: 0,
+            id: null
+        };
+        
+        // Other ships - using Map for better tracking
+        let otherShips = new Map();
+        
+        // Input state
+        const keys = {};
+        
+        // UI elements
+        const statusEl = document.getElementById('status');
+        const sessionEl = document.getElementById('sessionDisplay');
+        const myShipEl = document.getElementById('myShipId');
+        const otherCountEl = document.getElementById('otherShipCount');
+        const roomSizeEl = document.getElementById('roomSize');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        
+        // Connect to server
+        function connect() {
+            if (socket && socket.connected) {
+                console.log('Already connected');
+                return;
+            }
+            
+            const sessionId = document.getElementById('sessionInput').value.trim();
+            if (!sessionId) {
+                alert('Please enter a session ID');
+                return;
+            }
+            
+            updateStatus('Connecting...', 'waiting');
+            console.log('🔌 Connecting to server...');
+            
+            socket = io();
+            
+            socket.on('connect', () => {
+                console.log('✅ Connected to server, socket ID:', socket.id);
+                myShipId = socket.id;
+                myShip.id = socket.id;
+                isConnected = true;
+                
+                updateStatus('Connected', 'connected');
+                updateMyShipId(socket.id);
+                
+                // Join the session
+                console.log('🎯 Joining session:', sessionId);
+                socket.emit('join-simple-session', sessionId);
+            });
+            
+            socket.on('disconnect', () => {
+                console.log('❌ Disconnected from server');
+                isConnected = false;
+                currentSession = null;
+                otherShips.clear();
+                
+                updateStatus('Disconnected', 'disconnected');
+                updateSessionDisplay(null);
+                updateShipCounts();
+                updateButtons();
+            });
+            
+            socket.on('session-joined', (data) => {
+                console.log('✅ Session joined:', data);
+                currentSession = data.sessionId;
+                
+                updateSessionDisplay(data.sessionId);
+                updateRoomSize(data.playerCount);
+                updateButtons();
+            });
+            
+            socket.on('player-joined', (data) => {
+                console.log('👤 Player joined:', data.playerId);
+                // Don't count ourselves
+                if (data.playerId !== myShipId) {
+                    updateRoomSize(); // Will be updated by next player-update
+                }
+            });
+            
+            socket.on('player-left', (data) => {
+                console.log('👤 Player left:', data.playerId);
+                otherShips.delete(data.playerId);
+                updateShipCounts();
+            });
+            
+            socket.on('player-update', (data) => {
+                // Only process updates from other players
+                if (data.playerId !== myShipId) {
+                    updateOtherShip(data);
+                }
+            });
+        }
+        
+        function disconnect() {
+            if (socket) {
+                console.log('🔌 Disconnecting...');
+                socket.disconnect();
+                socket = null;
+            }
+            
+            isConnected = false;
+            currentSession = null;
+            myShipId = null;
+            otherShips.clear();
+            
+            updateStatus('Disconnected', 'disconnected');
+            updateSessionDisplay(null);
+            updateMyShipId(null);
+            updateShipCounts();
+            updateButtons();
+        }
+        
+        function updateOtherShip(data) {
+            if (!otherShips.has(data.playerId)) {
+                console.log('➕ Creating ship for new player:', data.playerId);
+                otherShips.set(data.playerId, {
+                    id: data.playerId,
+                    x: data.x,
+                    y: data.y,
+                    angle: data.angle
+                });
+            } else {
+                // Update existing ship
+                const ship = otherShips.get(data.playerId);
+                ship.x = data.x;
+                ship.y = data.y;
+                ship.angle = data.angle;
+            }
+            
+            updateShipCounts();
+        }
+        
+        // UI update functions
+        function updateStatus(text, className) {
+            statusEl.textContent = text;
+            statusEl.className = className;
+        }
+        
+        function updateSessionDisplay(sessionId) {
+            sessionEl.textContent = sessionId || 'None';
+        }
+        
+        function updateMyShipId(id) {
+            myShipEl.textContent = id ? id.substr(-6) : 'None';
+        }
+        
+        function updateShipCounts() {
+            const otherCount = otherShips.size;
+            otherCountEl.textContent = otherCount;
+        }
+        
+        function updateRoomSize(size) {
+            if (size !== undefined) {
+                roomSizeEl.textContent = size;
+            }
+        }
+        
+        function updateButtons() {
+            connectBtn.disabled = isConnected;
+            disconnectBtn.disabled = !isConnected;
+        }
+        
+        // Input handling
+        window.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            e.preventDefault();
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+            e.preventDefault();
+        });
+        
+        // Update my ship
+        function updateMyShip() {
+            // Simple movement with arrow keys
+            if (keys['ArrowUp']) {
+                myShip.vx += Math.cos(myShip.angle) * 0.3;
+                myShip.vy += Math.sin(myShip.angle) * 0.3;
+            }
+            if (keys['ArrowLeft']) {
+                myShip.angle -= 0.08;
+            }
+            if (keys['ArrowRight']) {
+                myShip.angle += 0.08;
+            }
+            
+            // Apply friction
+            myShip.vx *= 0.98;
+            myShip.vy *= 0.98;
+            
+            // Update position
+            myShip.x += myShip.vx;
+            myShip.y += myShip.vy;
+            
+            // Screen wrapping
+            if (myShip.x < 0) myShip.x = canvas.width;
+            if (myShip.x > canvas.width) myShip.x = 0;
+            if (myShip.y < 0) myShip.y = canvas.height;
+            if (myShip.y > canvas.height) myShip.y = 0;
+        }
+        
+        // Draw a ship
+        function drawShip(x, y, angle, color, label) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            
+            // Ship body
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color === '#00ff00' ? 'rgba(0,255,0,0.3)' : 'transparent';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(15, 0);
+            ctx.lineTo(-10, -8);
+            ctx.lineTo(-5, 0);
+            ctx.lineTo(-10, 8);
+            ctx.closePath();
+            ctx.stroke();
+            if (color === '#00ff00') ctx.fill();
+            
+            ctx.restore();
+            
+            // Ship label
+            if (label) {
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(label, x, y - 25);
+            }
+        }
+        
+        // Send my ship state
+        function broadcastMyShip() {
+            if (socket && socket.connected && currentSession) {
+                socket.emit('player-update', {
+                    x: myShip.x,
+                    y: myShip.y,
+                    angle: myShip.angle
+                });
+            }
+        }
+        
+        // Main game loop
+        function gameLoop() {
+            // Clear screen
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw simple starfield
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            for (let i = 0; i < 50; i++) {
+                const x = (i * 123.45) % canvas.width;
+                const y = (i * 678.91) % canvas.height;
+                ctx.beginPath();
+                ctx.arc(x, y, 1, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Update my ship
+            updateMyShip();
+            
+            // Draw my ship (green)
+            drawShip(myShip.x, myShip.y, myShip.angle, '#00ff00', 'YOU');
+            
+            // Draw other ships (red)
+            for (const [id, ship] of otherShips) {
+                drawShip(ship.x, ship.y, ship.angle, '#ff4444', id.substr(-6));
+            }
+            
+            // Draw connection status
+            if (!isConnected) {
+                ctx.fillStyle = 'rgba(255,0,0,0.7)';
+                ctx.font = 'bold 24px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('DISCONNECTED', canvas.width / 2, canvas.height / 2);
+            } else if (!currentSession) {
+                ctx.fillStyle = 'rgba(255,255,0,0.7)';
+                ctx.font = 'bold 24px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('NOT IN SESSION', canvas.width / 2, canvas.height / 2);
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start game loop
+        gameLoop();
+        
+        // Broadcast position every 50ms
+        setInterval(() => {
+            broadcastMyShip();
+        }, 50);
+        
+        // Initialize UI
+        updateButtons();
+    </script>
+</body>
+</html>

@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSSTeroids Multiplayer Debug</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #000;
+            color: #fff;
+        }
+        .debug-section {
+            border: 1px solid #333;
+            margin: 10px 0;
+            padding: 15px;
+            background: #111;
+        }
+        .status {
+            color: #0f0;
+        }
+        .error {
+            color: #f00;
+        }
+        .warning {
+            color: #ff0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background: #333;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #555;
+        }
+        #consoleOutput {
+            background: #000;
+            border: 1px solid #333;
+            padding: 10px;
+            height: 400px;
+            overflow-y: scroll;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .test-controls {
+            display: flex;
+            gap: 10px;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>CSSTeroids Multiplayer Debug Tool</h1>
+    
+    <div class="debug-section">
+        <h2>Connection Status</h2>
+        <div id="connectionStatus">Checking...</div>
+    </div>
+
+    <div class="debug-section">
+        <h2>Test Controls</h2>
+        <div class="test-controls">
+            <button onclick="testSocketConnection()">Test Socket Connection</button>
+            <button onclick="createTestSession()">Create Test Session</button>
+            <button onclick="joinTestSession()">Join Test Session</button>
+            <button onclick="startTestGame()">Start Test Game</button>
+            <button onclick="checkGameState()">Check Game State</button>
+            <button onclick="clearConsole()">Clear Console</button>
+        </div>
+    </div>
+
+    <div class="debug-section">
+        <h2>Debug Output</h2>
+        <div id="consoleOutput"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        let testSessionId = null;
+        let socket = null;
+        let gameStateReceived = false;
+        let playerStateReceived = false;
+
+        // Console capture
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const originalConsoleWarn = console.warn;
+
+        function logToOutput(message, type = 'log') {
+            const output = document.getElementById('consoleOutput');
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'error' ? 'error' : type === 'warn' ? 'warning' : 'status';
+            output.innerHTML += `<div class="${className}">[${timestamp}] ${message}</div>`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        console.log = function(...args) {
+            originalConsoleLog.apply(console, args);
+            logToOutput(args.join(' '), 'log');
+        };
+
+        console.error = function(...args) {
+            originalConsoleError.apply(console, args);
+            logToOutput(args.join(' '), 'error');
+        };
+
+        console.warn = function(...args) {
+            originalConsoleWarn.apply(console, args);
+            logToOutput(args.join(' '), 'warn');
+        };
+
+        function clearConsole() {
+            document.getElementById('consoleOutput').innerHTML = '';
+        }
+
+        function updateConnectionStatus(status) {
+            document.getElementById('connectionStatus').innerHTML = status;
+        }
+
+        function testSocketConnection() {
+            console.log('🔌 TESTING SOCKET CONNECTION...');
+            
+            if (typeof io === 'undefined') {
+                console.error('❌ Socket.io library not loaded!');
+                return;
+            }
+
+            socket = io({
+                transports: ['websocket', 'polling'],
+                upgrade: true,
+                forceNew: true,
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000,
+                timeout: 5000
+            });
+
+            socket.on('connect', () => {
+                console.log('✅ Socket connected successfully!', {
+                    socketId: socket.id,
+                    transport: socket.io.engine.transport.name
+                });
+                updateConnectionStatus(`✅ Connected - Socket ID: ${socket.id}`);
+            });
+
+            socket.on('disconnect', (reason) => {
+                console.log('❌ Socket disconnected:', reason);
+                updateConnectionStatus('❌ Disconnected');
+            });
+
+            socket.on('connect_error', (error) => {
+                console.error('❌ Connection error:', error);
+                updateConnectionStatus('❌ Connection Error');
+            });
+
+            // Test event listeners
+            socket.on('game-state-update', (data) => {
+                gameStateReceived = true;
+                console.log('🌍 🎯 RECEIVED GAME-STATE-UPDATE!', {
+                    asteroids: data.asteroids?.length || 0,
+                    enemies: data.enemies?.length || 0,
+                    bullets: data.bullets?.length || 0,
+                    sessionId: data.sessionId,
+                    timestamp: new Date().toISOString()
+                });
+            });
+
+            socket.on('player-state-update', (data) => {
+                playerStateReceived = true;
+                console.log('🎮 🎯 RECEIVED PLAYER-STATE-UPDATE!', {
+                    playerId: data.playerId,
+                    position: { x: data.ship?.x, y: data.ship?.y },
+                    sessionId: data.sessionId,
+                    timestamp: new Date().toISOString()
+                });
+            });
+
+            socket.on('session-joined', (data) => {
+                console.log('🎯 SESSION JOINED!', data);
+            });
+        }
+
+        function createTestSession() {
+            if (!socket || !socket.connected) {
+                console.error('❌ Socket not connected! Run socket test first.');
+                return;
+            }
+
+            testSessionId = 'test-' + Math.random().toString(36).substr(2, 9);
+            console.log('🏗️ Creating test session:', testSessionId);
+            
+            socket.emit('join-session', testSessionId);
+        }
+
+        function joinTestSession() {
+            if (!socket || !socket.connected) {
+                console.error('❌ Socket not connected! Run socket test first.');
+                return;
+            }
+
+            if (!testSessionId) {
+                console.error('❌ No test session ID! Create session first.');
+                return;
+            }
+
+            console.log('🚪 Joining test session:', testSessionId);
+            socket.emit('join-session', testSessionId);
+        }
+
+        function startTestGame() {
+            if (!socket || !socket.connected) {
+                console.error('❌ Socket not connected!');
+                return;
+            }
+
+            if (!testSessionId) {
+                console.error('❌ No test session ID!');
+                return;
+            }
+
+            console.log('🎮 Starting test game in session:', testSessionId);
+            
+            // Simulate game state update (acting as host)
+            const testGameState = {
+                sessionId: testSessionId,
+                asteroids: [
+                    { x: 100, y: 100, radius: 20, vx: 1, vy: 1 },
+                    { x: 200, y: 200, radius: 30, vx: -1, vy: 1 },
+                    { x: 300, y: 300, radius: 25, vx: 1, vy: -1 }
+                ],
+                enemies: [
+                    { x: 400, y: 400, type: 'basic', health: 1 }
+                ],
+                bullets: [
+                    { x: 50, y: 50, vx: 2, vy: 0, playerId: socket.id }
+                ],
+                level: 1,
+                score: 0,
+                lives: 3
+            };
+
+            console.log('📡 Broadcasting test game state...');
+            socket.emit('game-state-update', testGameState);
+
+            // Also test player state
+            const testPlayerState = {
+                sessionId: testSessionId,
+                playerId: socket.id,
+                ship: {
+                    x: 500,
+                    y: 500,
+                    angle: 0,
+                    rotation: 0,
+                    velocity: { x: 0, y: 0 },
+                    thrusting: false,
+                    alive: true,
+                    customLines: [],
+                    shipColor: 'white',
+                    thrusterColor: 'blue',
+                    playerName: 'Test Player'
+                },
+                timestamp: Date.now()
+            };
+
+            console.log('📡 Broadcasting test player state...');
+            socket.emit('player-state-update', testPlayerState);
+        }
+
+        function checkGameState() {
+            console.log('🔍 CHECKING RECEPTION STATUS:', {
+                gameStateReceived: gameStateReceived,
+                playerStateReceived: playerStateReceived,
+                socketConnected: socket?.connected || false,
+                socketId: socket?.id || 'none',
+                testSessionId: testSessionId
+            });
+
+            if (!gameStateReceived && !playerStateReceived) {
+                console.warn('⚠️ NO MESSAGES RECEIVED - This suggests a client-side event handling issue');
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('🚀 Multiplayer Debug Tool Loaded');
+            console.log('📝 Instructions:');
+            console.log('1. Click "Test Socket Connection" to establish connection');
+            console.log('2. Open another tab with this same page');
+            console.log('3. Click "Create Test Session" in first tab');
+            console.log('4. Click "Join Test Session" in second tab');
+            console.log('5. Click "Start Test Game" to broadcast game state');
+            console.log('6. Click "Check Game State" to see if messages were received');
+            
+            updateConnectionStatus('Not connected');
+        });
+    </script>
+</body>
+</html>

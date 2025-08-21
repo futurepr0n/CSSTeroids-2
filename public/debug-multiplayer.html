@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Multiplayer Debug Test</title>
+    <style>
+        body { font-family: monospace; background: #222; color: #0f0; margin: 20px; }
+        .log { margin: 5px 0; padding: 5px; background: #333; border-left: 3px solid #0f0; }
+        .error { border-left-color: #f00; color: #f88; }
+        .warning { border-left-color: #ff0; color: #ff8; }
+        .info { border-left-color: #08f; color: #8af; }
+        .success { border-left-color: #0f0; color: #8f8; }
+        button { padding: 10px; margin: 5px; background: #333; color: white; border: 1px solid #666; }
+        input { padding: 5px; background: #333; color: white; border: 1px solid #666; }
+        #status { font-size: 18px; font-weight: bold; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Multiplayer Connection Debug</h1>
+    
+    <div id="status">Status: Initializing...</div>
+    
+    <div>
+        <input type="text" id="sessionId" value="debug123" placeholder="Session ID">
+        <button onclick="joinSession()">Join Session</button>
+        <button onclick="startGame()">Start Game</button>
+        <button onclick="testPing()">Test Ping</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+    
+    <div>
+        <strong>Socket Info:</strong>
+        <div>Socket ID: <span id="socketId">Unknown</span></div>
+        <div>Connected: <span id="connected">No</span></div>
+        <div>Session: <span id="currentSession">None</span></div>
+    </div>
+    
+    <h3>Event Log:</h3>
+    <div id="log"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        let socket = null;
+        let currentSessionId = null;
+        
+        function log(message, type = 'log') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log ${type}`;
+            entry.innerHTML = `[${timestamp}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(`[${timestamp}] ${message}`);
+        }
+        
+        function updateStatus(status) {
+            document.getElementById('status').textContent = `Status: ${status}`;
+        }
+        
+        function updateSocketInfo() {
+            document.getElementById('socketId').textContent = socket?.id || 'Unknown';
+            document.getElementById('connected').textContent = socket?.connected ? 'Yes' : 'No';
+            document.getElementById('currentSession').textContent = currentSessionId || 'None';
+        }
+        
+        function initSocket() {
+            log('Initializing socket connection...', 'info');
+            updateStatus('Connecting...');
+            
+            const serverUrl = `${window.location.protocol}//${window.location.hostname}:6161`;
+            log(`Connecting to server at: ${serverUrl}`, 'info');
+            socket = io(serverUrl);
+            
+            socket.on('connect', () => {
+                log(`✅ Connected! Socket ID: ${socket.id}`, 'success');
+                updateStatus('Connected');
+                updateSocketInfo();
+            });
+            
+            socket.on('disconnect', () => {
+                log('❌ Disconnected from server', 'error');
+                updateStatus('Disconnected');
+                updateSocketInfo();
+            });
+            
+            socket.on('session-joined', (data) => {
+                log(`✅ Joined session: ${data.sessionId} (${data.playerCount} players)`, 'success');
+                currentSessionId = data.sessionId;
+                updateSocketInfo();
+            });
+            
+            socket.on('session-error', (error) => {
+                log(`❌ Session error: ${error.error}`, 'error');
+            });
+            
+            socket.on('player-joined', (data) => {
+                log(`👤 Player joined: ${data.playerId}`, 'info');
+            });
+            
+            socket.on('player-left', (data) => {
+                log(`👤 Player left: ${data.playerId}`, 'warning');
+            });
+            
+            socket.on('game-started', (data) => {
+                log(`🎮 Game started by: ${data.startedBy}`, 'success');
+            });
+            
+            socket.on('player-state-update', (data) => {
+                log(`🎮 Player update from ${data.playerId}: pos(${Math.round(data.ship.x)}, ${Math.round(data.ship.y)}) angle: ${data.ship.angle.toFixed(2)}`, 'info');
+            });
+            
+            socket.on('game-state-update', (data) => {
+                log(`🌍 Game state: Level ${data.level}, Asteroids: ${data.asteroids.length}, Enemies: ${data.enemies.length}, Bullets: ${data.bullets.length}`, 'info');
+            });
+            
+            socket.on('pong', () => {
+                log('🏓 Pong received!', 'success');
+            });
+        }
+        
+        function joinSession() {
+            const sessionId = document.getElementById('sessionId').value;
+            if (!socket || !socket.connected) {
+                log('❌ Not connected to server!', 'error');
+                return;
+            }
+            
+            log(`🎯 Joining session: ${sessionId}`, 'info');
+            socket.emit('join-session', sessionId);
+        }
+        
+        function startGame() {
+            if (!socket || !socket.connected || !currentSessionId) {
+                log('❌ Not connected or not in a session!', 'error');
+                return;
+            }
+            
+            log('🚀 Starting multiplayer game...', 'info');
+            socket.emit('start-multiplayer-game', {});
+        }
+        
+        function testPing() {
+            if (!socket || !socket.connected) {
+                log('❌ Not connected to server!', 'error');
+                return;
+            }
+            
+            log('🏓 Sending ping...', 'info');
+            socket.emit('ping');
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        // Initialize on page load
+        initSocket();
+        
+        // Send fake player updates every second for testing
+        setInterval(() => {
+            if (socket && socket.connected && currentSessionId) {
+                const fakeUpdate = {
+                    sessionId: currentSessionId,
+                    ship: {
+                        x: Math.random() * 800,
+                        y: Math.random() * 600,
+                        angle: Math.random() * Math.PI * 2,
+                        velocity: { x: 0, y: 0 },
+                        thrusting: false,
+                        alive: true,
+                        playerName: `Test Player ${socket.id.substr(-4)}`
+                    }
+                };
+                socket.emit('player-state-update', fakeUpdate);
+            }
+        }, 2000);
+    </script>
+</body>
+</html>

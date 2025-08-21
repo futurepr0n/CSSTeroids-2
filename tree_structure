@@ -1,0 +1,56 @@
+.
+├── models
+│   ├── HighScore.js
+│   ├── Ship.js
+│   └── index.js
+├── package-lock.json
+├── package.json
+├── public
+│   ├── css
+│   │   └── ship-customizer.css
+│   ├── index.html
+│   ├── js
+│   │   ├── core
+│   │   │   ├── game.js
+│   │   │   ├── menu.js
+│   │   │   └── utils.js
+│   │   ├── entities
+│   │   │   ├── asteroid.js
+│   │   │   ├── bullet.js
+│   │   │   ├── debris.js
+│   │   │   ├── enemy.js
+│   │   │   └── ship.js
+│   │   ├── main.js
+│   │   └── ship-customizer
+│   │       ├── core
+│   │       │   ├── init.js
+│   │       │   ├── settings.js
+│   │       │   ├── unified-click-handler.js
+│   │       │   └── utils.js
+│   │       ├── drawing
+│   │       │   ├── canvas.js
+│   │       │   ├── grid.js
+│   │       │   ├── modes.js
+│   │       │   └── preview.js
+│   │       ├── interaction
+│   │       │   ├── colors.js
+│   │       │   ├── design-mode.js
+│   │       │   ├── ship-models.js
+│   │       │   ├── thruster-mode.js
+│   │       │   └── weapon-mode.js
+│   │       ├── main.js
+│   │       ├── mobile-touch.js
+│   │       ├── responsive-canvas.js
+│   │       └── server
+│   │           └── api.js
+│   ├── ship-customization.html
+│   └── style.css
+├── routes
+│   ├── highscores.js
+│   └── ships.js
+├── server.js
+├── setup
+│   └── init-db.js
+├── tree_structure
+└── utils
+    └── helpers.js
