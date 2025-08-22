@@ -3194,10 +3194,17 @@ detectMobileDevice() {
             });
             
             if (actuallyHost) {
-                console.log('🎮 CONFIRMED HOST: Creating and broadcasting ONE asteroid...');
+                console.log('🎮 ✅ CONFIRMED HOST: Creating and broadcasting ONE asteroid...');
                 this.createLocalTestObjects(); // This now only creates one asteroid
             } else {
-                console.log('🎮 CLIENT: Waiting for host to broadcast asteroid...');
+                console.log('🎮 ❌ CLIENT: Waiting for host to broadcast asteroid...');
+                console.log('🎮 DEBUG: Host detection details:', {
+                    gameIsHost: this.isHost,
+                    sessionManagerExists: !!window.sessionManager,
+                    sessionManagerIsHost: window.sessionManager?.isHost,
+                    playerId: window.socketManager?.socket?.id,
+                    sessionId: this.sessionId
+                });
                 // Don't create backup objects - wait for host
             }
             
@@ -3328,10 +3335,19 @@ detectMobileDevice() {
         
         // Broadcast ONLY the asteroid parameters to other clients
         if (window.socketManager && window.socketManager.socket) {
-            console.log('🎮 Broadcasting single asteroid data...');
+            console.log('🎮 ✅ Broadcasting single asteroid data to server...');
+            console.log('🎮 ✅ Socket connected:', window.socketManager.socket.connected);
+            console.log('🎮 ✅ Current session:', window.socketManager.currentSessionId);
             window.socketManager.socket.emit('math-objects-spawn', {
                 asteroid: asteroidData
                 // No enemy - asteroid only
+            });
+            console.log('🎮 ✅ Broadcast sent successfully!');
+        } else {
+            console.log('🎮 ❌ ERROR: Cannot broadcast - socket not available:', {
+                hasSocketManager: !!window.socketManager,
+                hasSocket: !!window.socketManager?.socket,
+                socketConnected: window.socketManager?.socket?.connected
             });
         }
     }

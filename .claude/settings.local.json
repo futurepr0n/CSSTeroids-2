@@ -17,7 +17,9 @@
       "Bash(brew services start:*)",
       "Bash(sudo brew services start:*)",
       "Bash(open:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git config:*)",
+      "Bash(git commit:*)"
     ],
     "deny": []
   }
