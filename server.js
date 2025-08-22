@@ -608,11 +608,23 @@ io.on('connection', (socket) => {
   });
   
   // Handle mathematical objects spawn (formula-based synchronization)
-  socket.on('math-objects-spawn', (data) => {
-    if (!socket.currentSession) return;
+  socket.on('math-objects-spawn', (data, callback) => {
+    if (!socket.currentSession) {
+      if (callback) callback(false);
+      return;
+    }
     
     console.log(`🧮 SERVER: Broadcasting mathematical objects to session ${socket.currentSession}`);
+    console.log(`🧮 SERVER: Asteroid data:`, data.asteroid ? `ID: ${data.asteroid.id}` : 'No asteroid');
+    
+    // Broadcast to all other clients in the session
     socket.to(socket.currentSession).emit('math-objects-spawn', data);
+    
+    // Send acknowledgment back to sender
+    if (callback) {
+      callback(true);
+      console.log(`🧮 SERVER: Sent acknowledgment for mathematical objects spawn`);
+    }
   });
   
   // Handle mathematical objects destruction (synchronization)

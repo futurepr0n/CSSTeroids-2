@@ -58,31 +58,27 @@ class Asteroid {
         let x = this.mathData.startX + Math.cos(this.mathData.angle) * this.mathData.baseSpeed * elapsedTime * 50;
         let y = this.mathData.startY + Math.sin(this.mathData.angle) * this.mathData.baseSpeed * elapsedTime * 50;
         
-        // Handle bouncing off world boundaries mathematically
+        // Handle bouncing off world boundaries mathematically (fixed algorithm)
         const bounds = this.game.getWorldBounds();
         if (bounds.enabled) {
-            const width = bounds.width;
-            const height = bounds.height;
+            const effectiveWidth = bounds.width - 2 * this.radius;
+            const effectiveHeight = bounds.height - 2 * this.radius;
             
-            // Calculate how many times we've bounced
-            const totalDistance = this.mathData.baseSpeed * elapsedTime * 50;
+            // Use modulo arithmetic for perfect bouncing (prevents infinite loops)
+            const rawX = x - this.radius;
+            const rawY = y - this.radius;
             
-            // Simplified bouncing calculation
-            while (x < this.radius || x > width - this.radius) {
-                if (x < this.radius) {
-                    x = this.radius + (this.radius - x);
-                } else {
-                    x = (width - this.radius) - (x - (width - this.radius));
-                }
-            }
+            const normalizedX = rawX % (2 * effectiveWidth);
+            const normalizedY = rawY % (2 * effectiveHeight);
             
-            while (y < this.radius || y > height - this.radius) {
-                if (y < this.radius) {
-                    y = this.radius + (this.radius - y);
-                } else {
-                    y = (height - this.radius) - (y - (height - this.radius));
-                }
-            }
+            // Mathematical reflection using modulo
+            x = (normalizedX <= effectiveWidth) ? 
+                normalizedX + this.radius : 
+                (2 * effectiveWidth - normalizedX) + this.radius;
+                
+            y = (normalizedY <= effectiveHeight) ? 
+                normalizedY + this.radius : 
+                (2 * effectiveHeight - normalizedY) + this.radius;
         }
         
         this.x = x;

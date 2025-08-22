@@ -2243,29 +2243,18 @@ detectMobileDevice() {
         this.enemies = [];
         this.otherEnemies = {}; // Store enemy states from host
         
-        // Auto-spawn objects for testing (simplified approach)
-        console.log('🎮 *** SCHEDULING AUTO-SPAWN IN 3 SECONDS ***');
+        // Single spawn trigger with proper timing (simplified approach)
+        console.log('🎮 *** SCHEDULING ASTEROID SPAWN IN 2 SECONDS ***');
         setTimeout(() => {
-            console.log('🎮 *** TIMEOUT TRIGGERED - SPAWNING NOW ***');
+            console.log('🎮 *** SPAWN TIMEOUT TRIGGERED ***');
             this.forceSpawnTestObjects();
-        }, 3000); // Give time for all players to be ready
-        
-        // Also try immediate spawn as backup
-        console.log('🎮 *** ATTEMPTING IMMEDIATE SPAWN AS BACKUP ***');
-        setTimeout(() => {
-            console.log('🎮 *** IMMEDIATE SPAWN TRIGGERED ***');
-            this.forceSpawnTestObjects();
-        }, 500);
+        }, 2000); // Give time for session setup to complete
         
         // Start the game loop if not already running
         if (!this.isRunning) {
             console.log('🎮 GAME: Starting game loop after multiplayer game start...');
             this.gameLoop();
         }
-        
-        // Emergency spawn - call directly if all else fails
-        console.log('🎮 *** EMERGENCY DIRECT SPAWN CALL ***');
-        this.forceSpawnTestObjects();
     }
 
     broadcastPlayerState() {
@@ -2841,12 +2830,8 @@ detectMobileDevice() {
             calledFromStack: new Error().stack.split('\n')[2]?.trim()
         });
         
-        // Try spawning objects here as well
-        console.log('🎮 *** SPAWNING FROM setMultiplayerSession ***');
-        setTimeout(() => {
-            console.log('🎮 *** DELAYED SPAWN FROM setMultiplayerSession ***');
-            this.forceSpawnTestObjects();
-        }, 2000);
+        // Spawn triggering is now handled by handleGameStarted for better timing
+        console.log('🎮 Multiplayer session configured - spawn will be triggered by game start event');
         
         // Log previous state
         console.log('🔧 DEBUG: Previous multiplayer state:', {
@@ -3184,28 +3169,37 @@ detectMobileDevice() {
                 return;
             }
             
-            // Check if we're actually the host based on session manager
-            const actuallyHost = window.sessionManager && window.sessionManager.isHost;
-            console.log('🎮 Spawn check:', {
-                gameIsHost: this.isHost,
-                sessionManagerIsHost: actuallyHost,
-                sessionExists: !!window.sessionManager,
+            // Multiple ways to determine if we should spawn (fix for host detection race condition)
+            const sessionManagerHost = window.sessionManager && window.sessionManager.isHost;
+            const gameInstanceHost = this.isHost;
+            const playerId = window.socketManager?.socket?.id;
+            const sessionId = this.sessionId;
+            
+            // Enhanced host detection - use multiple criteria
+            const shouldSpawnAsHost = sessionManagerHost || gameInstanceHost || !sessionId || !playerId;
+            
+            console.log('🎮 Enhanced Spawn Check:', {
+                sessionManagerHost: sessionManagerHost,
+                gameInstanceHost: gameInstanceHost,
+                playerId: playerId,
+                sessionId: sessionId,
+                shouldSpawnAsHost: shouldSpawnAsHost,
                 hasExistingMathAsteroid: hasExistingMathAsteroid
             });
             
-            if (actuallyHost) {
-                console.log('🎮 ✅ CONFIRMED HOST: Creating and broadcasting ONE asteroid...');
-                this.createLocalTestObjects(); // This now only creates one asteroid
+            if (shouldSpawnAsHost) {
+                console.log('🎮 ✅ SPAWNING: Creating and broadcasting ONE asteroid...');
+                this.createLocalTestObjects();
             } else {
-                console.log('🎮 ❌ CLIENT: Waiting for host to broadcast asteroid...');
-                console.log('🎮 DEBUG: Host detection details:', {
-                    gameIsHost: this.isHost,
-                    sessionManagerExists: !!window.sessionManager,
-                    sessionManagerIsHost: window.sessionManager?.isHost,
-                    playerId: window.socketManager?.socket?.id,
-                    sessionId: this.sessionId
-                });
-                // Don't create backup objects - wait for host
+                console.log('🎮 ❌ CLIENT: Waiting for host broadcast...');
+                // Set a timeout to spawn fallback asteroid if no broadcast received
+                setTimeout(() => {
+                    const stillNoAsteroid = !this.asteroids.some(a => a.isMathematical);
+                    if (stillNoAsteroid) {
+                        console.log('🎮 ⚠️ FALLBACK: No asteroid received, creating locally...');
+                        this.createLocalTestObjects();
+                    }
+                }, 5000); // Wait 5 seconds for host broadcast
             }
             
         } catch (error) {
@@ -3334,21 +3328,33 @@ detectMobileDevice() {
         console.log('🎮 Created ONE mathematical asteroid:', asteroidData);
         
         // Broadcast ONLY the asteroid parameters to other clients
-        if (window.socketManager && window.socketManager.socket) {
+        if (window.socketManager && window.socketManager.socket && window.socketManager.socket.connected) {
             console.log('🎮 ✅ Broadcasting single asteroid data to server...');
             console.log('🎮 ✅ Socket connected:', window.socketManager.socket.connected);
             console.log('🎮 ✅ Current session:', window.socketManager.currentSessionId);
+            
+            // Use acknowledgment callback to ensure broadcast is received
             window.socketManager.socket.emit('math-objects-spawn', {
                 asteroid: asteroidData
-                // No enemy - asteroid only
+            }, (ack) => {
+                if (ack) {
+                    console.log('🎮 ✅ Broadcast acknowledged by server!');
+                } else {
+                    console.log('🎮 ⚠️ Broadcast sent but no acknowledgment received');
+                }
             });
-            console.log('🎮 ✅ Broadcast sent successfully!');
+            
+            console.log('🎮 ✅ Broadcast sent with acknowledgment callback!');
         } else {
             console.log('🎮 ❌ ERROR: Cannot broadcast - socket not available:', {
                 hasSocketManager: !!window.socketManager,
                 hasSocket: !!window.socketManager?.socket,
-                socketConnected: window.socketManager?.socket?.connected
+                socketConnected: window.socketManager?.socket?.connected,
+                currentSession: window.socketManager?.currentSessionId
             });
+            
+            // If broadcast fails, ensure other clients still get asteroids
+            console.log('🎮 ⚠️ Broadcast failed - other clients will use fallback spawn');
         }
     }
     
