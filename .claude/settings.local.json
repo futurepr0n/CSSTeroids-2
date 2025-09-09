@@ -20,7 +20,12 @@
       "Bash(git add:*)",
       "Bash(git config:*)",
       "Bash(git commit:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(git checkout:*)",
+      "WebSearch",
+      "mcp__gemini-cli__ask-gemini",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_click"
     ],
     "deny": []
   }

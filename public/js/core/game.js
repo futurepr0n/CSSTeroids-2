@@ -297,8 +297,8 @@ detectMobileDevice() {
         window.addEventListener('keydown', (e) => {
             this.keys[e.key] = true;
             
-            // Toggle pause with P or Escape
-            if (e.key === 'p' || e.key === 'Escape') {
+            // Toggle pause with P or Escape (disabled in multiplayer)
+            if ((e.key === 'p' || e.key === 'Escape') && !this.isMultiplayer()) {
                 this.togglePause();
             }
             
@@ -548,7 +548,7 @@ detectMobileDevice() {
         if (this.isMultiplayer() && this.otherPlayers) {
             for (const playerId in this.otherPlayers) {
                 const player = this.otherPlayers[playerId];
-                if (player) {
+                if (player && player.visible) {  // Only draw if visible
                     this.ctx.save();
                     this.ctx.translate(player.x, player.y);
                     this.ctx.rotate(player.angle);
@@ -929,6 +929,10 @@ detectMobileDevice() {
         // Skip collision checks in demo mode
         if (this.demoMode) return;
         
+        // In multiplayer mode, only the host performs collision detection for shared objects
+        // Each client still checks their own ship collisions
+        const isMultiplayer = this.isMultiplayer();
+        
         // Check ship collision with asteroids
         for (const asteroid of this.asteroids) {
             // Use the enhanced collision detection on the ship
@@ -937,9 +941,16 @@ detectMobileDevice() {
                 
                 // Only process the hit if the ship is not invulnerable
                 if (!this.ship.invulnerable) {
-                    if (this.ship.hit()) {
-                        // We break after a successful hit to prevent multiple hits in one frame
-                        break;
+                    // In multiplayer, broadcast the collision to all clients
+                    if (isMultiplayer) {
+                        this.broadcastShipCollision('asteroid', asteroid.id, this.playerId);
+                        // Don't process the hit locally - wait for the broadcast
+                    } else {
+                        // In singleplayer, process the hit immediately
+                        if (this.ship.hit()) {
+                            // We break after a successful hit to prevent multiple hits in one frame
+                            break;
+                        }
                     }
                 } else {
                     console.log("Ship is invulnerable, ignoring asteroid collision");
@@ -1102,8 +1113,9 @@ detectMobileDevice() {
         // Create debris
         this.createDebrisFromAsteroid(asteroid);
         
-        // Split into smaller asteroids if not smallest size
-        if (asteroid.size > 1) {
+        // In multiplayer mode, asteroids are destroyed directly without splitting
+        // In singleplayer mode, split into smaller asteroids if not smallest size
+        if (!this.isMultiplayer() && asteroid.size > 1) {
             for (let i = 0; i < 2; i++) {
                 this.asteroids.push(new Asteroid(
                     asteroid.x,
@@ -1743,7 +1755,8 @@ detectMobileDevice() {
                     thrusting: this.ship.thrusting,
                     vx: this.ship.thrust.x,  // Fixed: ship uses thrust, not velocity
                     vy: this.ship.thrust.y,  // Fixed: ship uses thrust, not velocity
-                    playerName: this.ship.playerName || 'Player'
+                    playerName: this.ship.playerName || 'Player',
+                    visible: this.ship.visible  // Include visibility state
                 };
                 window.socketManager.socket.emit('player-update', updateData);
             }
@@ -1758,7 +1771,7 @@ detectMobileDevice() {
             this.otherPlayers = {};
         }
         
-        // Update or create player data
+        // Update or create player data - simple update without complex state preservation
         this.otherPlayers[data.playerId] = {
             x: data.x,
             y: data.y,
@@ -1767,7 +1780,8 @@ detectMobileDevice() {
             vx: data.vx || 0,
             vy: data.vy || 0,
             playerName: data.playerName || data.playerId.substr(-6),
-            shipData: this.otherPlayers[data.playerId]?.shipData || null
+            shipData: this.otherPlayers[data.playerId]?.shipData || null,
+            visible: data.visible !== undefined ? data.visible : true  // Use the visibility state from the update
         };
         
         // Log only on first creation
@@ -2215,6 +2229,11 @@ detectMobileDevice() {
         // Handle mathematical object destruction
         window.socketManager.socket.on('math-objects-destroyed', (data) => {
             this.handleMathObjectDestroyed(data);
+        });
+        
+        // Handle ship collision events from other clients
+        window.socketManager.socket.on('ship-collision', (data) => {
+            this.handleShipCollision(data);
         });
         
         // Mark handlers as registered
@@ -3378,6 +3397,19 @@ detectMobileDevice() {
         // NO ENEMY PROCESSING - asteroid only for now
     }
     
+    // Broadcast ship collision to other clients
+    broadcastShipCollision(objectType, objectId, playerId) {
+        if (window.socketManager && window.socketManager.socket) {
+            console.log(`🚢 Broadcasting ship collision with ${objectType} ${objectId}`);
+            window.socketManager.socket.emit('ship-collision', {
+                objectType: objectType,
+                objectId: objectId,
+                playerId: playerId,
+                timestamp: Date.now()
+            });
+        }
+    }
+    
     // Broadcast object destruction to other clients
     broadcastObjectDestroyed(objectType, objectId) {
         if (window.socketManager && window.socketManager.socket) {
@@ -3387,6 +3419,51 @@ detectMobileDevice() {
                 id: objectId,
                 timestamp: Date.now()
             });
+        }
+    }
+    
+    // Handle ship collision from any client
+    handleShipCollision(data) {
+        console.log(`🚢 Received ship collision: player ${data.playerId} hit ${data.objectType} ${data.objectId}`);
+        
+        // Process collision for local ship
+        if (this.playerId === data.playerId) {
+            if (this.ship && !this.ship.invulnerable && !this.ship.exploding) {
+                // Process the hit on the local ship
+                this.ship.hit();
+            }
+        } 
+        // Process collision for other players' ships
+        else if (this.otherPlayers && this.otherPlayers[data.playerId]) {
+            const otherPlayer = this.otherPlayers[data.playerId];
+            console.log(`💥 Other player ${data.playerId} ship exploding`);
+            
+            // Just create debris effect at other player's position
+            // Don't manage visibility - let the normal position updates handle that
+            if (otherPlayer.x && otherPlayer.y) {
+                const numParticles = 20;
+                const DebrisClass = window.Debris || Debris;
+                for (let i = 0; i < numParticles; i++) {
+                    const debris = new DebrisClass(
+                        otherPlayer.x,
+                        otherPlayer.y,
+                        Math.random() * Math.PI * 2,
+                        this
+                    );
+                    // Make ship debris more colorful
+                    debris.color = i % 2 === 0 ? 'orange' : 'red';
+                    this.debris.push(debris);
+                }
+            }
+        }
+        
+        // Destroy the asteroid if it was an asteroid collision
+        if (data.objectType === 'asteroid') {
+            const asteroidIndex = this.asteroids.findIndex(a => a.id === data.objectId);
+            if (asteroidIndex !== -1) {
+                // Use splitAsteroid which already handles multiplayer mode
+                this.splitAsteroid(asteroidIndex);
+            }
         }
     }
     
@@ -3400,9 +3477,12 @@ detectMobileDevice() {
             if (asteroidIndex !== -1) {
                 const asteroid = this.asteroids[asteroidIndex];
                 
-                // Create debris and split if necessary (same as local destruction)
+                // Create debris
                 this.createDebrisFromAsteroid(asteroid);
-                if (asteroid.size > 1) {
+                
+                // In multiplayer mode, asteroids are destroyed directly without splitting
+                // In singleplayer mode, split into smaller asteroids if not smallest size
+                if (!this.isMultiplayer() && asteroid.size > 1) {
                     for (let i = 0; i < 2; i++) {
                         this.asteroids.push(new Asteroid(
                             asteroid.x,

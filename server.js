@@ -634,6 +634,15 @@ io.on('connection', (socket) => {
     console.log(`💥 SERVER: Broadcasting ${data.type} ${data.id} destruction to session ${socket.currentSession}`);
     socket.to(socket.currentSession).emit('math-objects-destroyed', data);
   });
+  
+  // Handle ship collision events (synchronization)
+  socket.on('ship-collision', (data) => {
+    if (!socket.currentSession) return;
+    
+    console.log(`🚢 SERVER: Broadcasting ship collision to session ${socket.currentSession}`);
+    // Broadcast to ALL clients in the session, including the sender
+    io.to(socket.currentSession).emit('ship-collision', data);
+  });
 });
 
 // Session cleanup function
