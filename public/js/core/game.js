@@ -430,9 +430,28 @@ detectMobileDevice() {
         
         // Update enemies
         for (let i = this.enemies.length - 1; i >= 0; i--) {
-            this.enemies[i].update(dt);
+            const enemy = this.enemies[i];
+            if (!enemy.active) continue; // Skip inactive enemies
+
+            if (enemy.isMultiplayerEnemy && this.isHost) {
+                enemy.multiplayerUpdate(dt);
+            } else if (enemy.isClientControlled) {
+                // Client: interpolate towards server position for smooth movement
+                enemy.interpolatePosition(dt);
+            } else {
+                enemy.update(dt);
+            }
         }
-        
+
+        // Broadcast enemy states periodically (host only, ~10 FPS)
+        if (this.isHost && this.isMultiplayer()) {
+            this._enemyBroadcastTimer = (this._enemyBroadcastTimer || 0) + dt;
+            if (this._enemyBroadcastTimer >= 0.1) {
+                this._enemyBroadcastTimer = 0;
+                this.broadcastEnemyStates();
+            }
+        }
+
         // Handle collisions
         this.checkCollisions();
 
@@ -441,11 +460,15 @@ detectMobileDevice() {
             if (this.isMultiplayer()) {
                 // Multiplayer: Check round completion (host only)
                 // One-time log when asteroids reach 0
-                if (this.asteroids.length === 0 && !this._asteroidsZeroLogged) {
-                    debugLog('⚠️ ASTEROIDS AT ZERO - Checking conditions:', {
+                // Count multiplayer enemies (only those, not single-player enemies)
+                const multiplayerEnemyCount = this.enemies.filter(e => e.isMultiplayerEnemy && e.active).length;
+
+                if (this.asteroids.length === 0 && multiplayerEnemyCount === 0 && !this._asteroidsZeroLogged) {
+                    debugLog('⚠️ ROUND COMPLETE CHECK - Checking conditions:', {
                         isHost: this.isHost,
                         roundStarted: this.multiplayerRoundStarted,
                         asteroidsLength: this.asteroids.length,
+                        enemyCount: multiplayerEnemyCount,
                         transitioning: this.roundTransitioning,
                         willComplete: this.isHost && this.multiplayerRoundStarted && !this.roundTransitioning
                     });
@@ -455,6 +478,7 @@ detectMobileDevice() {
                 if (this.isHost &&
                     this.multiplayerRoundStarted &&
                     this.asteroids.length === 0 &&
+                    multiplayerEnemyCount === 0 &&
                     !this.roundTransitioning) {
                     debugLog('🏆 HOST: Calling completeMultiplayerRound()');
                     this._asteroidsZeroLogged = false; // Reset for next round
@@ -1006,10 +1030,19 @@ detectMobileDevice() {
             // Use the enhanced collision detection on the ship
             if (this.ship.checkCollision(enemy)) {
                 debugLog("Ship collided with enemy");
-                
+
                 // Only process the hit if the ship is not invulnerable
                 if (!this.ship.invulnerable) {
                     if (this.ship.hit()) {
+                        // Broadcast ship explosion to other clients in multiplayer
+                        if (this.isMultiplayer() && window.socketManager?.socket?.connected) {
+                            window.socketManager.socket.emit('ship-explosion', {
+                                playerId: this.playerId,
+                                x: this.ship.x,
+                                y: this.ship.y,
+                                timestamp: Date.now()
+                            });
+                        }
                         // We break after a successful hit to prevent multiple hits in one frame
                         break;
                     }
@@ -1085,26 +1118,34 @@ detectMobileDevice() {
                 // Now check against enemies
                 for (let j = this.enemies.length - 1; j >= 0; j--) {
                     const enemy = this.enemies[j];
-                    
+
                     const distance = Math.sqrt(
-                        Math.pow(bullet.x - enemy.x, 2) + 
+                        Math.pow(bullet.x - enemy.x, 2) +
                         Math.pow(bullet.y - enemy.y, 2)
                     );
-                    
+
                     if (distance < bullet.radius + enemy.radius) {
                         debugLog("Bullet hit enemy");
-                        
+
                         // Remove bullet
                         this.bullets.splice(i, 1);
-                        
-                        // If this is a mathematical enemy, broadcast its destruction
-                        if (enemy.isMathematical && enemy.id) {
+
+                        // Handle multiplayer enemy damage
+                        if (enemy.isMultiplayerEnemy && this.isHost) {
+                            const destroyed = enemy.takeDamage();
+                            if (destroyed) {
+                                this.broadcastEnemyDestroyedEvent(enemy);
+                                this.destroyEnemy(j);
+                            }
+                        } else if (enemy.isMathematical && enemy.id) {
+                            // Mathematical enemy (old system)
                             this.broadcastObjectDestroyed('enemy', enemy.id);
+                            this.destroyEnemy(j);
+                        } else {
+                            // Single player enemy
+                            this.destroyEnemy(j);
                         }
-                        
-                        // Destroy enemy
-                        this.destroyEnemy(j);
-                        
+
                         // Mark bullet as destroyed to skip enemy loop
                         bulletDestroyed = true;
                         break;
@@ -1191,19 +1232,29 @@ detectMobileDevice() {
     }
     
     createDebrisFromShip() {
+        // Validate ship position to prevent NaN issues
+        if (!this.ship || !isFinite(this.ship.x) || !isFinite(this.ship.y)) {
+            debugLog('createDebrisFromShip: Invalid ship position, skipping debris');
+            return;
+        }
+
         const numParticles = 20;
-        
+        const shipX = this.ship.x;
+        const shipY = this.ship.y;
+
+        debugLog(`Creating ship debris at (${shipX.toFixed(0)}, ${shipY.toFixed(0)})`);
+
         for (let i = 0; i < numParticles; i++) {
             const debris = new Debris(
-                this.ship.x,
-                this.ship.y,
+                shipX,
+                shipY,
                 Math.random() * Math.PI * 2,
                 this
             );
-            
+
             // Make ship debris more colorful
             debris.color = i % 2 === 0 ? 'orange' : 'red';
-            
+
             this.debris.push(debris);
         }
     }
@@ -2299,6 +2350,31 @@ detectMobileDevice() {
         // Handle multiplayer game completion (all rounds finished)
         window.socketManager.socket.on('multiplayer-game-complete', (data) => {
             this.handleMultiplayerGameComplete(data);
+        });
+
+        // Handle CPU enemy spawn (multiplayer)
+        window.socketManager.socket.on('enemy-spawn', (data) => {
+            this.handleEnemySpawn(data);
+        });
+
+        // Handle CPU enemy state updates (multiplayer)
+        window.socketManager.socket.on('enemy-state-update', (data) => {
+            this.handleEnemyStateUpdate(data);
+        });
+
+        // Handle CPU enemy shooting (multiplayer)
+        window.socketManager.socket.on('enemy-shoot', (data) => {
+            this.handleEnemyShoot(data);
+        });
+
+        // Handle CPU enemy destroyed (multiplayer)
+        window.socketManager.socket.on('enemy-destroyed', (data) => {
+            this.handleEnemyDestroyed(data);
+        });
+
+        // Handle ship explosion from other players (multiplayer)
+        window.socketManager.socket.on('ship-explosion', (data) => {
+            this.handleShipExplosion(data);
         });
 
         // Mark handlers as registered
@@ -3714,7 +3790,130 @@ detectMobileDevice() {
         // Spawn asteroids for this round
         this.spawnMultiplayerRoundAsteroids(this.multiplayerRound);
 
+        // Spawn CPU enemies starting at round 3
+        if (this.multiplayerRound >= 3) {
+            this.spawnMultiplayerEnemies(this.multiplayerRound);
+        }
+
         this.roundTransitioning = false;
+    }
+
+    // Get enemy count based on round number
+    getEnemyCountForRound(round) {
+        if (round < 3) return 0;
+        if (round <= 5) return 1;
+        if (round <= 8) return 2;
+        return 3; // rounds 9-10
+    }
+
+    // Spawn CPU enemies for multiplayer (host only)
+    spawnMultiplayerEnemies(round) {
+        if (!this.isHost) return;
+
+        const enemyCount = this.getEnemyCountForRound(round);
+        debugLog(`👾 HOST: Spawning ${enemyCount} CPU enemies for Round ${round}`);
+
+        for (let i = 0; i < enemyCount; i++) {
+            setTimeout(() => {
+                this.spawnSingleMultiplayerEnemy(i, round);
+            }, i * 300 + 500); // Stagger spawns, start 500ms after round begins
+        }
+    }
+
+    // Spawn a single multiplayer enemy with synchronization
+    spawnSingleMultiplayerEnemy(index, round) {
+        const spawnTime = Date.now();
+        const enemyId = `enemy_r${round}_${index}_${spawnTime}`;
+
+        // Spawn at random position away from players
+        const bounds = this.getWorldBounds();
+        const width = bounds.enabled ? bounds.width : this.canvas.width;
+        const height = bounds.enabled ? bounds.height : this.canvas.height;
+
+        let x, y, validPosition = false;
+        const minDistanceFromPlayer = 200;
+
+        for (let attempt = 0; attempt < 20; attempt++) {
+            x = 100 + Math.random() * (width - 200);
+            y = 100 + Math.random() * (height - 200);
+
+            let tooClose = false;
+            if (this.ship && !this.ship.exploding) {
+                const dx = this.ship.x - x;
+                const dy = this.ship.y - y;
+                if (Math.sqrt(dx * dx + dy * dy) < minDistanceFromPlayer) {
+                    tooClose = true;
+                }
+            }
+
+            if (!tooClose) {
+                validPosition = true;
+                break;
+            }
+        }
+
+        if (!validPosition) {
+            x = width / 2;
+            y = 100;
+        }
+
+        const enemy = new Enemy(x, y, this);
+        enemy.id = enemyId;
+        enemy.isMultiplayerEnemy = true;
+        enemy.waypointSeed = spawnTime + index;
+        enemy.health = 3;
+        enemy.shootCooldown = 2 + Math.random() * 2; // Don't shoot immediately
+        enemy.generateNextWaypoint();
+
+        this.enemies.push(enemy);
+
+        // Broadcast spawn to clients
+        if (window.socketManager?.socket?.connected) {
+            window.socketManager.socket.emit('enemy-spawn', {
+                id: enemyId,
+                x: x,
+                y: y,
+                angle: enemy.angle,
+                waypointSeed: enemy.waypointSeed,
+                health: enemy.health,
+                shootCooldown: enemy.shootCooldown
+            });
+        }
+
+        debugLog(`👾 HOST: Spawned enemy ${enemyId} at (${x.toFixed(0)}, ${y.toFixed(0)})`);
+    }
+
+    // Broadcast enemy shooting (called from Enemy.multiplayerUpdate)
+    broadcastEnemyShoot(enemy) {
+        if (!this.isHost || !window.socketManager?.socket?.connected) return;
+
+        window.socketManager.socket.emit('enemy-shoot', {
+            enemyId: enemy.id,
+            x: enemy.x + Math.cos(enemy.angle) * 15,
+            y: enemy.y + Math.sin(enemy.angle) * 15,
+            angle: enemy.angle
+        });
+    }
+
+    // Broadcast all enemy states to clients (called periodically from game loop)
+    broadcastEnemyStates() {
+        if (!this.isHost || !window.socketManager?.socket?.connected) return;
+
+        for (const enemy of this.enemies) {
+            if (enemy.isMultiplayerEnemy && enemy.active) {
+                window.socketManager.socket.emit('enemy-state-update', enemy.getStateForBroadcast());
+            }
+        }
+    }
+
+    // Broadcast enemy destruction to clients
+    broadcastEnemyDestroyedEvent(enemy) {
+        if (!this.isHost || !window.socketManager?.socket?.connected) return;
+
+        debugLog(`👾 HOST: Broadcasting enemy destroyed ${enemy.id}`);
+        window.socketManager.socket.emit('enemy-destroyed', {
+            id: enemy.id
+        });
     }
 
     // Spawn multiple mathematical asteroids for a round
@@ -3808,6 +4007,116 @@ detectMobileDevice() {
     handleMultiplayerGameComplete(data) {
         debugLog(`🎉 CLIENT: Received game completion! Final round: ${data.finalRound}`);
         this.showMultiplayerGameComplete();
+    }
+
+    // Handle CPU enemy spawn from server (for clients)
+    handleEnemySpawn(data) {
+        if (this.isHost) return; // Host already has enemy
+
+        debugLog(`👾 CLIENT: Received enemy spawn ${data.id}`);
+
+        const enemy = new Enemy(data.x, data.y, this);
+        enemy.id = data.id;
+        enemy.isMultiplayerEnemy = true;
+        enemy.waypointSeed = data.waypointSeed;
+        enemy.health = data.health;
+        enemy.angle = data.angle || 0; // Ensure angle is set
+        enemy.shootCooldown = data.shootCooldown || 3; // Ensure cooldown is set
+        enemy.isClientControlled = true; // Client doesn't run AI, just receives updates
+
+        this.enemies.push(enemy);
+    }
+
+    // Handle CPU enemy state updates from server (for clients)
+    handleEnemyStateUpdate(data) {
+        if (this.isHost) return;
+
+        // Validate data
+        if (!isFinite(data.x) || !isFinite(data.y) || !isFinite(data.angle)) {
+            return; // Silently skip invalid updates
+        }
+
+        const enemy = this.enemies.find(e => e.id === data.id);
+        if (enemy) {
+            enemy.setStateFromNetwork(data);
+        }
+    }
+
+    // Handle CPU enemy shooting from server (for clients)
+    handleEnemyShoot(data) {
+        if (this.isHost) return;
+
+        // Validate data to prevent NaN errors
+        if (!isFinite(data.x) || !isFinite(data.y) || !isFinite(data.angle)) {
+            debugLog('👾 CLIENT: Invalid enemy shoot data, skipping', data);
+            return;
+        }
+
+        debugLog(`👾 CLIENT: Enemy ${data.enemyId} shooting at (${data.x.toFixed(0)}, ${data.y.toFixed(0)})`);
+
+        try {
+            const bullet = new Bullet(
+                data.x,
+                data.y,
+                data.angle,
+                0, 0,
+                this,
+                'enemy'
+            );
+            this.bullets.push(bullet);
+        } catch (e) {
+            debugLog('Error creating enemy bullet from network:', e);
+        }
+    }
+
+    // Handle CPU enemy destroyed from server (for clients)
+    handleEnemyDestroyed(data) {
+        if (this.isHost) return;
+
+        debugLog(`👾 CLIENT: Enemy ${data.id} destroyed`);
+
+        const idx = this.enemies.findIndex(e => e.id === data.id);
+        if (idx !== -1) {
+            const enemy = this.enemies[idx];
+            if (typeof this.createDebrisFromEnemy === 'function') {
+                this.createDebrisFromEnemy(enemy);
+            }
+            this.enemies.splice(idx, 1);
+        }
+    }
+
+    handleShipExplosion(data) {
+        if (data.playerId === this.playerId) return;
+
+        debugLog(`💥 Received ship explosion for player ${data.playerId} at (${data.x}, ${data.y})`);
+
+        if (!isFinite(data.x) || !isFinite(data.y)) {
+            debugLog('handleShipExplosion: Invalid position, skipping debris');
+            return;
+        }
+
+        this.createDebrisAtPosition(data.x, data.y);
+    }
+
+    createDebrisAtPosition(x, y) {
+        if (!isFinite(x) || !isFinite(y)) {
+            debugLog('createDebrisAtPosition: Invalid position, skipping debris');
+            return;
+        }
+
+        const numParticles = 20;
+        debugLog(`Creating ship debris at (${x.toFixed(0)}, ${y.toFixed(0)})`);
+
+        for (let i = 0; i < numParticles; i++) {
+            const debris = new Debris(
+                x,
+                y,
+                Math.random() * Math.PI * 2,
+                this
+            );
+            debris.color = i % 2 === 0 ? 'orange' : 'red';
+            this.debris.push(debris);
+        }
     }
 
     // Seeded random number generator for consistent randomization

@@ -681,6 +681,49 @@ io.on('connection', (socket) => {
     // Broadcast to all other clients in the session
     socket.to(activeSession).emit('multiplayer-game-complete', data);
   });
+
+  // Handle CPU enemy spawn (multiplayer)
+  socket.on('enemy-spawn', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) return;
+
+    console.log(`👾 SERVER: Broadcasting enemy spawn ${data.id} in session ${activeSession}`);
+    socket.to(activeSession).emit('enemy-spawn', data);
+  });
+
+  // Handle CPU enemy state updates (multiplayer)
+  socket.on('enemy-state-update', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) return;
+
+    socket.to(activeSession).emit('enemy-state-update', data);
+  });
+
+  // Handle CPU enemy shooting (multiplayer)
+  socket.on('enemy-shoot', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) return;
+
+    socket.to(activeSession).emit('enemy-shoot', data);
+  });
+
+  // Handle CPU enemy destroyed (multiplayer)
+  socket.on('enemy-destroyed', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) return;
+
+    console.log(`👾 SERVER: Broadcasting enemy destroyed ${data.id} in session ${activeSession}`);
+    socket.to(activeSession).emit('enemy-destroyed', data);
+  });
+
+  // Handle ship explosion (for syncing explosion effects)
+  socket.on('ship-explosion', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) return;
+
+    console.log(`💥 SERVER: Broadcasting ship explosion for player ${data.playerId} in session ${activeSession}`);
+    socket.to(activeSession).emit('ship-explosion', data);
+  });
 });
 
 // Session cleanup function
