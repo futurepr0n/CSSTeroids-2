@@ -115,6 +115,7 @@ class Game {
         this.roundTransitioning = false; // Reset round transition flag
         this.multiplayerRoundStarted = false; // Reset round started flag
         this._gameStartedHandled = false; // Reset game started handler flag
+        this._initialSpawnScheduled = false; // Prevent duplicate initial spawns
         this.asteroids = [];
         this.bullets = [];
         this.debris = [];
@@ -906,11 +907,11 @@ detectMobileDevice() {
             yPos += 25;
         }
         
-        // Top-center: Level info (prominent)
+        // Top-center: Round info (prominent) - use multiplayerRound for multiplayer
         this.ctx.fillStyle = '#ffff00';
         this.ctx.font = 'bold 24px Arial';
         this.ctx.textAlign = 'center';
-        this.ctx.fillText(`LEVEL ${this.level}`, this.canvas.width / 2, 35);
+        this.ctx.fillText(`ROUND ${this.multiplayerRound}`, this.canvas.width / 2, 35);
         
         // Top-right: Game stats
         this.ctx.fillStyle = 'white';
@@ -1369,8 +1370,17 @@ detectMobileDevice() {
     }
     
     showLevelMessage() {
+        // Update the level message text based on game mode
+        if (this.isMultiplayer()) {
+            this.levelMessage.innerHTML = `Round&nbsp;<span id="levelNumber">${this.multiplayerRound}</span>`;
+        } else {
+            this.levelMessage.innerHTML = `Level&nbsp;<span id="levelNumber">${this.level}</span>`;
+        }
+        // Update reference to levelNumber element
+        this.levelNumber = document.getElementById('levelNumber');
+
         this.levelMessage.style.display = 'flex';
-        
+
         // Hide after 2 seconds
         setTimeout(() => {
             this.levelMessage.style.display = 'none';
@@ -1462,10 +1472,13 @@ detectMobileDevice() {
         const scoreElement = document.getElementById('score');
         const livesElement = document.getElementById('lives');
         const levelElement = document.getElementById('level');
-        
+
         if (scoreElement) scoreElement.textContent = this.score;
         if (livesElement) livesElement.textContent = this.lives;
-        if (levelElement) levelElement.textContent = this.level;
+        if (levelElement) {
+            // In multiplayer, show round number; in singleplayer, show level
+            levelElement.textContent = this.isMultiplayer() ? this.multiplayerRound : this.level;
+        }
     }
     
     // Game mode configuration methods
@@ -2322,11 +2335,19 @@ detectMobileDevice() {
         this.otherEnemies = {}; // Store enemy states from host
 
         // Update UI to show Round 1
+        // Update levelNumber span (just the number, "Round" is in parent element)
         if (this.levelNumber) {
-            this.levelNumber.textContent = `Round ${this.multiplayerRound}`;
+            this.levelNumber.textContent = this.multiplayerRound;
         }
 
         // Schedule initial spawn with delay for client sync
+        // Guard against duplicate spawn scheduling
+        if (this._initialSpawnScheduled) {
+            debugLog('🎮 GAME: Initial spawn already scheduled, skipping');
+            return;
+        }
+        this._initialSpawnScheduled = true;
+
         setTimeout(() => {
             // Double-check we haven't already spawned (in case forceSpawnTestObjects ran)
             if (this.asteroids.length > 0 && this.asteroids.some(a => a.isMathematical)) {
@@ -2353,13 +2374,8 @@ detectMobileDevice() {
             this.multiplayerRoundStarted = true;
             debugLog('🎮 GAME: multiplayerRoundStarted set to TRUE');
 
-            // Show round message
-            if (this.levelMessage) {
-                this.levelMessage.style.display = 'flex';
-                setTimeout(() => {
-                    this.levelMessage.style.display = 'none';
-                }, 2000);
-            }
+            // Show round message (updates innerHTML and displays)
+            this.showLevelMessage();
         }, 2000); // Give time for session setup to complete
 
         // Note: Game loop should already be running from init()
@@ -2669,12 +2685,6 @@ detectMobileDevice() {
         
         if (!data.ship) {
             // Silently ignore - ship may be exploding or respawning
-            // Only log occasionally to avoid console spam
-            if (!this._shipNullLogCount) this._shipNullLogCount = 0;
-            this._shipNullLogCount++;
-            if (this._shipNullLogCount === 1 || this._shipNullLogCount % 300 === 0) {
-                console.warn('🚀 UPDATE: Skipping update - data.ship is null (count:', this._shipNullLogCount, ')');
-            }
             return;
         }
 
@@ -3268,6 +3278,13 @@ detectMobileDevice() {
         debugLog('🎮 *** FORCE SPAWN FUNCTION CALLED (ROUND-BASED MODE) ***');
 
         try {
+            // Guard against duplicate spawn scheduling
+            if (this._initialSpawnScheduled) {
+                debugLog('🎮 Initial spawn already scheduled elsewhere, skipping forceSpawn');
+                return;
+            }
+            this._initialSpawnScheduled = true;
+
             // Check if we already have mathematical asteroids to prevent duplicates
             const hasExistingMathAsteroid = this.asteroids.some(a => a.isMathematical);
             if (hasExistingMathAsteroid) {
@@ -3691,6 +3708,9 @@ detectMobileDevice() {
             });
         }
 
+        // Show round message for host (clients receive via round-transition event)
+        this.showLevelMessage();
+
         // Spawn asteroids for this round
         this.spawnMultiplayerRoundAsteroids(this.multiplayerRound);
 
@@ -3780,18 +3800,8 @@ detectMobileDevice() {
         this.roundTransitioning = false;
         this.multiplayerRoundStarted = true;
 
-        // Update UI if needed
-        if (this.levelNumber) {
-            this.levelNumber.textContent = `Round ${this.multiplayerRound}`;
-        }
-
-        // Show round message
-        if (this.levelMessage) {
-            this.levelMessage.style.display = 'flex';
-            setTimeout(() => {
-                this.levelMessage.style.display = 'none';
-            }, 2000);
-        }
+        // Show round transition message
+        this.showLevelMessage();
     }
 
     // Handle multiplayer game completion from server (for clients)
