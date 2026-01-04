@@ -437,8 +437,20 @@ io.on('connection', (socket) => {
 
   // Simple session join for minimal test (no database)
   socket.on('join-simple-session', (sessionId) => {
+    // CRITICAL FIX: Prevent unnecessary re-joining of the same session
+    if (socket.currentSession === sessionId) {
+      console.log(`🎮 Socket ${socket.id} already in session ${sessionId}, skipping re-join`);
+      // Just send confirmation without leaving/rejoining
+      socket.emit('session-joined', {
+        sessionId: sessionId,
+        playerId: socket.id,
+        playerCount: io.sockets.adapter.rooms.get(sessionId)?.size || 0
+      });
+      return;
+    }
+
     console.log(`🎮 Socket ${socket.id} joining simple session: ${sessionId}`);
-    
+
     // Leave any previous session and update player count
     if (socket.currentSession) {
       socket.leave(socket.currentSession);
@@ -450,7 +462,7 @@ io.on('connection', (socket) => {
         console.log(`Updated previous session ${socket.currentSession} player count to ${prevRoomSize}`);
       }
     }
-    
+
     // Join new session
     socket.join(sessionId);
     socket.currentSession = sessionId;
@@ -638,10 +650,36 @@ io.on('connection', (socket) => {
   // Handle ship collision events (synchronization)
   socket.on('ship-collision', (data) => {
     if (!socket.currentSession) return;
-    
+
     console.log(`🚢 SERVER: Broadcasting ship collision to session ${socket.currentSession}`);
     // Broadcast to ALL clients in the session, including the sender
     io.to(socket.currentSession).emit('ship-collision', data);
+  });
+
+  // Handle round transitions (multiplayer round progression)
+  socket.on('round-transition', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) {
+      console.log('🏆 SERVER: Rejecting round-transition - no active session');
+      return;
+    }
+
+    console.log(`🏆 SERVER: Broadcasting round transition to Round ${data.round} in session ${activeSession}`);
+    // Broadcast to all other clients in the session
+    socket.to(activeSession).emit('round-transition', data);
+  });
+
+  // Handle multiplayer game completion (all 10 rounds finished)
+  socket.on('multiplayer-game-complete', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) {
+      console.log('🎉 SERVER: Rejecting game-complete - no active session');
+      return;
+    }
+
+    console.log(`🎉 SERVER: Broadcasting game completion (Round ${data.finalRound}) to session ${activeSession}`);
+    // Broadcast to all other clients in the session
+    socket.to(activeSession).emit('multiplayer-game-complete', data);
   });
 });
 

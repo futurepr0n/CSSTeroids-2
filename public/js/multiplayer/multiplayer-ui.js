@@ -14,23 +14,23 @@ class MultiplayerUI {
         this.initializeManagers();
         this.isInitialized = true;
         
-        console.log('Multiplayer UI initialized');
+        debugLog('Multiplayer UI initialized');
     }
 
     // Initialize socket and session managers
     initializeManagers() {
-        console.log('🎮 UI: Initializing managers...');
-        console.log('🎮 UI: Socket manager available:', !!window.socketManager);
+        debugLog('🎮 UI: Initializing managers...');
+        debugLog('🎮 UI: Socket manager available:', !!window.socketManager);
         
         // Initialize socket connection
         if (window.socketManager) {
-            console.log('🎮 UI: Initializing socket manager...');
+            debugLog('🎮 UI: Initializing socket manager...');
             const initResult = window.socketManager.initialize();
-            console.log('🎮 UI: Socket manager initialization result:', initResult);
+            debugLog('🎮 UI: Socket manager initialization result:', initResult);
             
             // Setup connection status callback
             window.socketManager.onConnectionChange((connected) => {
-                console.log('🎮 UI: Connection status changed:', connected);
+                debugLog('🎮 UI: Connection status changed:', connected);
                 this.updateConnectionStatus(connected);
             });
 
@@ -213,7 +213,7 @@ class MultiplayerUI {
             });
 
             if (result.success) {
-                console.log('Session created successfully');
+                debugLog('Session created successfully');
                 this.updateSessionDisplay();
             } else {
                 console.error('Failed to create session:', result.error);
@@ -240,7 +240,7 @@ class MultiplayerUI {
             return;
         }
 
-        console.log('Joining session by ID:', sessionId);
+        debugLog('Joining session by ID:', sessionId);
         
         const button = document.getElementById('joinSessionButton');
         if (button) {
@@ -254,7 +254,7 @@ class MultiplayerUI {
             });
 
             if (result.success) {
-                console.log('Successfully joined session');
+                debugLog('Successfully joined session');
                 this.updateSessionDisplay();
                 // Clear the input
                 if (sessionIdInput) sessionIdInput.value = '';
@@ -278,8 +278,8 @@ class MultiplayerUI {
         if (!window.socketManager || !window.sessionManager) return;
 
         try {
-            console.log(`🎯 CLIENT: Attempting to join session: ${sessionId}`);
-            console.log('🎯 CLIENT: Socket manager state:', {
+            debugLog(`🎯 CLIENT: Attempting to join session: ${sessionId}`);
+            debugLog('🎯 CLIENT: Socket manager state:', {
                 hasSocketManager: !!window.socketManager,
                 isConnected: window.socketManager?.isConnected,
                 socketId: window.socketManager?.socket?.id
@@ -287,14 +287,14 @@ class MultiplayerUI {
             
             // Use WebSocket to join session directly
             if (window.socketManager.isConnected) {
-                console.log('🎯 CLIENT: Socket connected, joining session...');
+                debugLog('🎯 CLIENT: Socket connected, joining session...');
                 window.socketManager.joinSession(sessionId);
                 
                 // Update session manager state
                 window.sessionManager.currentSession = { id: sessionId };
                 window.sessionManager.isHost = false;
                 
-                console.log('🎯 CLIENT: Join request sent via WebSocket, updated session manager');
+                debugLog('🎯 CLIENT: Join request sent via WebSocket, updated session manager');
             } else {
                 console.error('🚨 CLIENT: Socket not connected!');
                 alert('Not connected to server!');
@@ -440,7 +440,7 @@ class MultiplayerUI {
             // Show button if there are players in the session and game hasn't started
             const canStart = status.session.currentPlayers > 0 && (status.gameState === 'waiting' || !status.gameState);
             
-            console.log('🎮 START BUTTON: Checking if can start game:', {
+            debugLog('🎮 START BUTTON: Checking if can start game:', {
                 currentPlayers: status.session.currentPlayers,
                 gameState: status.gameState,
                 canStart: canStart,
@@ -497,28 +497,28 @@ class MultiplayerUI {
 
     // Handle multiplayer events
     handlePlayerJoined(data) {
-        console.log('Player joined:', data);
+        debugLog('Player joined:', data);
         if (window.sessionManager && window.sessionManager.isMultiplayerActive()) {
             window.sessionManager.refreshSessionInfo();
         }
     }
 
     handlePlayerLeft(data) {
-        console.log('Player left:', data);
+        debugLog('Player left:', data);
         if (window.sessionManager && window.sessionManager.isMultiplayerActive()) {
             window.sessionManager.refreshSessionInfo();
         }
     }
 
     handlePlayerDisconnected(data) {
-        console.log('Player disconnected:', data);
+        debugLog('Player disconnected:', data);
         if (window.sessionManager && window.sessionManager.isMultiplayerActive()) {
             window.sessionManager.refreshSessionInfo();
         }
     }
 
     handleSessionJoined(data) {
-        console.log('Session joined successfully:', data);
+        debugLog('Session joined successfully:', data);
         
         // Update session manager state with server response
         if (window.sessionManager) {
@@ -549,7 +549,7 @@ class MultiplayerUI {
 
     // Start multiplayer game (any player can trigger)
     startMultiplayerGame() {
-        console.log('🚨 MULTIPLAYER UI: ⭐ START MULTIPLAYER GAME BUTTON CLICKED! ⭐');
+        debugLog('🚨 MULTIPLAYER UI: ⭐ START MULTIPLAYER GAME BUTTON CLICKED! ⭐');
         
         if (!window.sessionManager || !window.sessionManager.isMultiplayerActive()) {
             alert('No active multiplayer session!');
@@ -566,7 +566,7 @@ class MultiplayerUI {
 
     // Handle game started event from server
     handleGameStarted(data) {
-        console.log('🚨 MULTIPLAYER UI: ⭐ GAME STARTED EVENT RECEIVED! ⭐', data);
+        debugLog('🚨 MULTIPLAYER UI: ⭐ GAME STARTED EVENT RECEIVED! ⭐', data);
         
         const worldDimensions = {
             width: data.worldWidth,
@@ -574,7 +574,7 @@ class MultiplayerUI {
         };
         
         // Configure game for multiplayer mode
-        console.log("Checking game instance:", {
+        debugLog("Checking game instance:", {
             gameExists: !!window.game,
             gameType: typeof window.game
         });
@@ -582,13 +582,13 @@ class MultiplayerUI {
         if (window.game) {
             this.initializeMultiplayerGame(worldDimensions);
         } else {
-            console.log('Game instance not found, creating it now...');
+            debugLog('Game instance not found, creating it now...');
             
             // Create game instance if it doesn't exist
             try {
                 window.game = new Game();
                 const menu = new GameMenu(window.game);
-                console.log('Game instance created successfully');
+                debugLog('Game instance created successfully');
                 
                 this.initializeMultiplayerGame(worldDimensions);
             } catch (error) {
@@ -600,9 +600,9 @@ class MultiplayerUI {
 
     // Initialize the actual multiplayer game
     initializeMultiplayerGame(worldDimensions) {
-        console.log(`🎮 INIT: ⭐ STARTING GAME INITIALIZATION ⭐`);
-        console.log(`🎮 INIT: Configuring game for multiplayer: ${worldDimensions.width}x${worldDimensions.height} world`);
-        console.log(`🎮 INIT: Pre-initialization socket state:`, {
+        debugLog(`🎮 INIT: ⭐ STARTING GAME INITIALIZATION ⭐`);
+        debugLog(`🎮 INIT: Configuring game for multiplayer: ${worldDimensions.width}x${worldDimensions.height} world`);
+        debugLog(`🎮 INIT: Pre-initialization socket state:`, {
             hasSocketManager: !!window.socketManager,
             isConnected: window.socketManager?.isConnected,
             socketId: window.socketManager?.socket?.id,
@@ -618,7 +618,7 @@ class MultiplayerUI {
             let isHost = window.sessionManager.isHost;
             if (sessionStatus.session && sessionStatus.session.hostPlayerId) {
                 const serverDeterminedHost = (playerId === sessionStatus.session.hostPlayerId);
-                console.log('🎮 INIT: 🚨 HOST STATUS VERIFICATION 🚨', {
+                debugLog('🎮 INIT: 🚨 HOST STATUS VERIFICATION 🚨', {
                     sessionManagerSaysHost: window.sessionManager.isHost,
                     myPlayerId: playerId,
                     sessionHostPlayerId: sessionStatus.session.hostPlayerId,
@@ -628,8 +628,8 @@ class MultiplayerUI {
                 isHost = serverDeterminedHost; // Use server's authoritative determination
             }
             
-            console.log('🎮 INIT: Setting up multiplayer session info...');
-            console.log('🎮 INIT: 🚨 HOST STATUS DEBUG 🚨', {
+            debugLog('🎮 INIT: Setting up multiplayer session info...');
+            debugLog('🎮 INIT: 🚨 HOST STATUS DEBUG 🚨', {
                 sessionManagerIsHost: window.sessionManager.isHost,
                 calculatedIsHost: isHost,
                 sessionManagerExists: !!window.sessionManager,
@@ -637,7 +637,7 @@ class MultiplayerUI {
                 playerId: playerId,
                 socketId: window.socketManager?.socket?.id
             });
-            console.log('🎮 INIT: SessionManager state:', {
+            debugLog('🎮 INIT: SessionManager state:', {
                 hasSessionManager: !!window.sessionManager,
                 sessionStatus: sessionStatus,
                 hasSocketManager: !!window.socketManager,
@@ -650,14 +650,14 @@ class MultiplayerUI {
             // Check if we have a valid session
             if (sessionStatus.session && sessionStatus.session.id) {
                 // Set multiplayer session info in the game FIRST
-                console.log(`🎮 INIT: Setting multiplayer session: ${sessionStatus.session.id}, Player: ${playerId}, Host: ${isHost}`);
+                debugLog(`🎮 INIT: Setting multiplayer session: ${sessionStatus.session.id}, Player: ${playerId}, Host: ${isHost}`);
                 window.game.setMultiplayerSession(sessionStatus.session.id, playerId, isHost);
-                console.log(`🎮 INIT: Session setup complete: ${sessionStatus.session.id}, Player: ${playerId}, Host: ${isHost}`);
+                debugLog(`🎮 INIT: Session setup complete: ${sessionStatus.session.id}, Player: ${playerId}, Host: ${isHost}`);
             } else {
                 console.error('🎮 INIT ERROR: No valid session available for multiplayer setup!', sessionStatus);
                 // Try to get session from current session ID
                 if (window.socketManager && window.socketManager.currentSessionId) {
-                    console.log('🎮 INIT: Using socket manager session ID:', window.socketManager.currentSessionId);
+                    debugLog('🎮 INIT: Using socket manager session ID:', window.socketManager.currentSessionId);
                     window.game.setMultiplayerSession(window.socketManager.currentSessionId, playerId, isHost);
                 } else {
                     console.error('🎮 INIT ERROR: Cannot set up multiplayer session - no session ID available');
@@ -678,28 +678,39 @@ class MultiplayerUI {
         this.hideAllMenuScreens();
         
         // Initialize the game (this creates the ship and starts the game loop)
-        console.log('🎮 INIT: About to call window.game.init()...');
+        debugLog('🎮 INIT: About to call window.game.init()...');
         window.game.init();
-        console.log('🎮 INIT: window.game.init() completed');
+        debugLog('🎮 INIT: window.game.init() completed');
+
+        // CRITICAL FIX: Explicitly trigger handleGameStarted to ensure round progression variables are set
+        // This fixes a race condition where the game-started event handler is registered AFTER the event fires
+        debugLog('🎮 INIT: Explicitly calling handleGameStarted to ensure proper initialization');
+        window.game.handleGameStarted({
+            sessionId: window.sessionManager?.currentSession?.id,
+            worldWidth: worldDimensions.width,
+            worldHeight: worldDimensions.height,
+            startedBy: window.socketManager?.socket?.id,
+            timestamp: Date.now()
+        });
         
         // Apply loaded custom ship data to the player's ship (like custom-ships-minimal.html)
         if (this.loadedShipData && window.game.ship) {
-            console.log('🚢 INIT: Applying loaded ship data to player ship:', this.loadedShipData);
+            debugLog('🚢 INIT: Applying loaded ship data to player ship:', this.loadedShipData);
             this.applyShipDataToGame(window.game.ship, this.loadedShipData);
             
             // Broadcast ship data to other players (like custom-ships-minimal.html)
             if (window.socketManager && window.socketManager.isConnected) {
-                console.log('🚢 INIT: Broadcasting ship data to other players');
+                debugLog('🚢 INIT: Broadcasting ship data to other players');
                 window.socketManager.emit('player-ship-data', {
                     shipData: this.loadedShipData
                 });
             }
         } else {
-            console.log('🚢 INIT: No custom ship data loaded or no ship available');
+            debugLog('🚢 INIT: No custom ship data loaded or no ship available');
         }
         
         // Check post-initialization state
-        console.log('🎮 INIT: Post-initialization socket state:', {
+        debugLog('🎮 INIT: Post-initialization socket state:', {
             hasSocketManager: !!window.socketManager,
             isConnected: window.socketManager?.isConnected,
             socketId: window.socketManager?.socket?.id,
@@ -710,23 +721,23 @@ class MultiplayerUI {
         
         // If host, immediately broadcast initial game state to sync all players
         if (window.sessionManager && window.sessionManager.isHost) {
-            console.log('🎮 INIT: Host will broadcast initial game state in 100ms...');
+            debugLog('🎮 INIT: Host will broadcast initial game state in 100ms...');
             setTimeout(() => {
                 if (window.game && window.game.broadcastGameState) {
-                    console.log('🎮 INIT: Host broadcasting initial game state now');
+                    debugLog('🎮 INIT: Host broadcasting initial game state now');
                     window.game.broadcastGameState();
-                    console.log('🎮 INIT: Host sent initial game state to clients');
+                    debugLog('🎮 INIT: Host sent initial game state to clients');
                 } else {
                     console.error('🎮 INIT: Cannot broadcast - game or broadcastGameState method missing');
                 }
             }, 100);
         } else {
-            console.log('🎮 INIT: Non-host client - waiting for game state from host');
+            debugLog('🎮 INIT: Non-host client - waiting for game state from host');
         }
         
-        console.log('🎮 INIT: ✅ Multiplayer game initialization completed successfully!');
-        console.log(`Ship bounded to ${worldDimensions.width}x${worldDimensions.height} world`);
-        console.log('Real-time synchronization active!');
+        debugLog('🎮 INIT: ✅ Multiplayer game initialization completed successfully!');
+        debugLog(`Ship bounded to ${worldDimensions.width}x${worldDimensions.height} world`);
+        debugLog('Real-time synchronization active!');
     }
     
     // Helper method to hide all menu screens (similar to GameMenu.hideAllScreens)
@@ -772,7 +783,7 @@ class MultiplayerUI {
         loadButton.textContent = 'Loading...';
 
         try {
-            console.log('🚢 Loading ship with passphrase:', passphrase);
+            debugLog('🚢 Loading ship with passphrase:', passphrase);
             const response = await fetch(`/api/ships/passphrase/${passphrase}`);
 
             if (!response.ok) {
@@ -780,7 +791,7 @@ class MultiplayerUI {
             }
 
             this.loadedShipData = await response.json();
-            console.log('🚢 Loaded ship data:', this.loadedShipData);
+            debugLog('🚢 Loaded ship data:', this.loadedShipData);
 
             // Update UI
             shipName.textContent = this.loadedShipData.name;
@@ -788,7 +799,7 @@ class MultiplayerUI {
             shipColor.textContent = this.loadedShipData.color || 'white';
             shipInfo.style.display = 'block';
 
-            console.log('🚢 Ship loaded successfully for multiplayer');
+            debugLog('🚢 Ship loaded successfully for multiplayer');
 
         } catch (error) {
             console.error('🚢 Error loading ship:', error);
@@ -804,11 +815,11 @@ class MultiplayerUI {
     // Apply ship data to the game ship (like custom-ships-minimal.html)
     applyShipDataToGame(ship, shipData) {
         if (!shipData || !ship) {
-            console.log('🚢 Cannot apply ship data - missing data or ship');
+            debugLog('🚢 Cannot apply ship data - missing data or ship');
             return;
         }
 
-        console.log('🚢 Applying ship data to game ship:', {
+        debugLog('🚢 Applying ship data to game ship:', {
             customLines: shipData.customLines?.length || 0,
             color: shipData.color,
             thrusterColor: shipData.thrusterColor,
@@ -825,7 +836,7 @@ class MultiplayerUI {
         ship.weaponPoints = shipData.weaponPoints || [];
         ship.playerName = shipData.name || 'Player';
         
-        console.log('🚢 Game ship properties after applying data:', {
+        debugLog('🚢 Game ship properties after applying data:', {
             shipType: ship.shipType,
             customLinesCount: ship.customLines.length,
             shipColor: ship.shipColor,
@@ -840,7 +851,7 @@ window.multiplayerUI = new MultiplayerUI();
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🎮 UI: DOM loaded, checking multiplayer dependencies...', {
+    debugLog('🎮 UI: DOM loaded, checking multiplayer dependencies...', {
         multiplayerUI: !!window.multiplayerUI,
         socketManager: !!window.socketManager,
         sessionManager: !!window.sessionManager,
@@ -849,7 +860,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     if (window.multiplayerUI) {
-        console.log('🎮 UI: Initializing multiplayer UI...');
+        debugLog('🎮 UI: Initializing multiplayer UI...');
         window.multiplayerUI.initialize();
     } else {
         console.error('🎮 UI ERROR: multiplayerUI not available!');
