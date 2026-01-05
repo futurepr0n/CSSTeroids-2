@@ -524,7 +524,19 @@ detectMobileDevice() {
           const bullets = this.ship.shoot();
           if (bullets) {
             this.bullets = this.bullets.concat(bullets);
-            
+
+            // Check for enemy aggro when shooting (bullet proximity aggro system)
+            if (this.isMultiplayer() && bullets.length > 0) {
+              for (const enemy of this.enemies) {
+                if (enemy.active && enemy.checkBulletAggro) {
+                  // Check each bullet for aggro - 'main' identifies this as the local player
+                  for (const bullet of bullets) {
+                    enemy.checkBulletAggro(bullet.x, bullet.y, 'main');
+                  }
+                }
+              }
+            }
+
             // Broadcast shooting action in multiplayer (deterministic approach)
             if (this.isMultiplayer() && window.socketManager?.socket?.connected) {
               // Send the shoot action with ship state at time of firing
@@ -642,22 +654,49 @@ detectMobileDevice() {
                             }
                         });
                         
-                        // Draw custom thruster points if thrusting
-                        if (player.thrusting && player.shipData.thrusterPoints) {
-                            player.shipData.thrusterPoints.forEach(point => {
-                                // Draw thruster flame
-                                const flicker = Math.random() * 0.3 + 0.7;
-                                const length = 15 * 0.6 * flicker;
-                                const width = 15 * 0.3 * flicker;
-                                
-                                this.ctx.fillStyle = 'orange';
+                        // Draw thruster flames if thrusting
+                        if (player.thrusting) {
+                            const flicker = Math.random() * 0.3 + 0.7;
+                            const length = 15 * 0.6 * flicker;
+                            const width = 15 * 0.3 * flicker;
+
+                            // Helper function to draw a thruster flame at a point
+                            const drawThrusterFlame = (x, y) => {
+                                const gradient = this.ctx.createLinearGradient(x, y, x, y + length);
+                                gradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+                                gradient.addColorStop(0.3, 'rgba(255, 165, 0, 0.7)');
+                                gradient.addColorStop(0.8, 'rgba(255, 0, 0, 0.5)');
+                                gradient.addColorStop(1, 'rgba(100, 0, 0, 0)');
+
                                 this.ctx.beginPath();
-                                this.ctx.moveTo(point.x * 0.25, point.y * 0.25);
-                                this.ctx.lineTo(point.x * 0.25 - width / 2, point.y * 0.25 + length);
-                                this.ctx.lineTo(point.x * 0.25 + width / 2, point.y * 0.25 + length);
+                                this.ctx.moveTo(x, y);
+                                this.ctx.lineTo(x - width / 2, y + length);
+                                this.ctx.lineTo(x + width / 2, y + length);
                                 this.ctx.closePath();
+                                this.ctx.fillStyle = gradient;
                                 this.ctx.fill();
-                            });
+                            };
+
+                            // Use custom thruster points if available
+                            if (player.shipData.thrusterPoints && player.shipData.thrusterPoints.length > 0) {
+                                player.shipData.thrusterPoints.forEach(point => {
+                                    drawThrusterFlame(point.x * 0.25, point.y * 0.25);
+                                });
+                            } else {
+                                // Fallback: find lowest points of custom ship (like ship.js does)
+                                let lowestPoints = [];
+                                customLines.forEach(line => {
+                                    lowestPoints.push({ x: line.startX, y: line.startY });
+                                    lowestPoints.push({ x: line.endX, y: line.endY });
+                                });
+                                lowestPoints.sort((a, b) => b.y - a.y);
+                                const threshold = lowestPoints[0].y - 20;
+                                lowestPoints = lowestPoints.filter(p => p.y >= threshold).slice(0, 3);
+
+                                lowestPoints.forEach(point => {
+                                    drawThrusterFlame(point.x * 0.25, point.y * 0.25);
+                                });
+                            }
                         }
                     } else {
                         // Draw default ship shape (corrected orientation to match Ship class)
@@ -670,15 +709,27 @@ detectMobileDevice() {
                         this.ctx.lineTo(10.5, 10.5); // Bottom right
                         this.ctx.closePath();
                         this.ctx.stroke();
-                        
-                        // Draw thruster if active
+
+                        // Draw thruster if active - pointing backward (+Y direction)
                         if (player.thrusting) {
-                            this.ctx.strokeStyle = '#ffaa00';
+                            const flicker = Math.random() * 0.3 + 0.7;
+                            const length = 15 * 0.6 * flicker;
+                            const width = 15 * 0.3 * flicker;
+                            const y = 10.5; // At the back of the ship
+
+                            const gradient = this.ctx.createLinearGradient(0, y, 0, y + length);
+                            gradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+                            gradient.addColorStop(0.3, 'rgba(255, 165, 0, 0.7)');
+                            gradient.addColorStop(0.8, 'rgba(255, 0, 0, 0.5)');
+                            gradient.addColorStop(1, 'rgba(100, 0, 0, 0)');
+
                             this.ctx.beginPath();
-                            this.ctx.moveTo(-5, -4);
-                            this.ctx.lineTo(-15, 0);
-                            this.ctx.lineTo(-5, 4);
-                            this.ctx.stroke();
+                            this.ctx.moveTo(0, y);
+                            this.ctx.lineTo(-width / 2, y + length);
+                            this.ctx.lineTo(width / 2, y + length);
+                            this.ctx.closePath();
+                            this.ctx.fillStyle = gradient;
+                            this.ctx.fill();
                         }
                     }
                     
@@ -1025,13 +1076,31 @@ detectMobileDevice() {
             }
         }
         
-        // Check ship collision with enemies
-        for (const enemy of this.enemies) {
+        // Check ship collision with enemies - mutual destruction
+        for (let i = this.enemies.length - 1; i >= 0; i--) {
+            const enemy = this.enemies[i];
             // Use the enhanced collision detection on the ship
             if (this.ship.checkCollision(enemy)) {
-                debugLog("Ship collided with enemy");
+                debugLog("Ship collided with enemy - mutual destruction");
 
-                // Only process the hit if the ship is not invulnerable
+                // Destroy the enemy ship regardless of player invulnerability
+                const enemyX = enemy.x;
+                const enemyY = enemy.y;
+                const enemyId = enemy.id;
+                enemy.hit();
+                this.enemies.splice(i, 1);
+
+                // Broadcast enemy destruction in multiplayer
+                if (this.isMultiplayer() && window.socketManager?.socket?.connected) {
+                    window.socketManager.socket.emit('enemy-destroyed', {
+                        enemyId: enemyId,
+                        x: enemyX,
+                        y: enemyY,
+                        reason: 'collision'
+                    });
+                }
+
+                // Only damage the player if not invulnerable
                 if (!this.ship.invulnerable) {
                     if (this.ship.hit()) {
                         // Broadcast ship explosion to other clients in multiplayer
@@ -1047,7 +1116,7 @@ detectMobileDevice() {
                         break;
                     }
                 } else {
-                    debugLog("Ship is invulnerable, ignoring enemy collision");
+                    debugLog("Ship is invulnerable, enemy destroyed but player survives");
                 }
             }
         }
@@ -1856,6 +1925,15 @@ detectMobileDevice() {
                 debugLog('💥 Adding', bullets.length, 'bullets to game');
                 this.bullets = this.bullets.concat(bullets);
                 debugLog('💥 Total bullets now:', this.bullets.length);
+
+                // Check for enemy aggro when other player shoots
+                for (const enemy of this.enemies) {
+                    if (enemy.active && enemy.checkBulletAggro) {
+                        for (const bullet of bullets) {
+                            enemy.checkBulletAggro(bullet.x, bullet.y, data.playerId);
+                        }
+                    }
+                }
             }
         });
         
