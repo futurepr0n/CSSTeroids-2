@@ -1066,16 +1066,27 @@ detectMobileDevice() {
             if (bullet.source === 'enemy') {
                 // Skip if player ship is invulnerable or exploding
                 if (this.ship.invulnerable || this.ship.exploding) continue;
-                
+
                 // Use enhanced collision detection
                 if (this.ship.checkCollision(bullet)) {
                     debugLog("Enemy bullet hit player ship");
-                    
+
                     // Remove bullet
                     this.bullets.splice(i, 1);
-                    
-                    // Damage player
-                    this.ship.hit();
+
+                    // Damage player and broadcast explosion to other clients
+                    if (this.ship.hit()) {
+                        debugLog(`💥 Ship hit by enemy bullet at (${this.ship.x.toFixed(0)}, ${this.ship.y.toFixed(0)})`);
+                        if (this.isMultiplayer() && window.socketManager?.socket?.connected) {
+                            debugLog(`💥 Broadcasting ship-explosion event`);
+                            window.socketManager.socket.emit('ship-explosion', {
+                                playerId: this.playerId,
+                                x: this.ship.x,
+                                y: this.ship.y,
+                                timestamp: Date.now()
+                            });
+                        }
+                    }
                     continue; // Skip to next bullet
                 }
             } 
@@ -2321,12 +2332,7 @@ detectMobileDevice() {
         window.socketManager.socket.on('enemies-update', (data) => {
             this.handleEnemiesUpdate(data);
         });
-        
-        // Handle enemy shooting
-        window.socketManager.socket.on('enemy-shoot', (data) => {
-            this.handleEnemyShoot(data.enemyId);
-        });
-        
+
         // Handle mathematical objects spawn
         window.socketManager.socket.on('math-objects-spawn', (data) => {
             this.handleMathObjectsSpawn(data);
@@ -3340,15 +3346,7 @@ detectMobileDevice() {
         const activeEnemyIds = data.enemies.map(e => e.id);
         this.enemies = this.enemies.filter(e => activeEnemyIds.includes(e.id));
     }
-    
-    // Handle enemy shooting (host broadcasts to clients)
-    handleEnemyShoot(enemyId) {
-        const enemy = this.enemies.find(e => e.id === enemyId);
-        if (enemy) {
-            enemy.shoot();
-        }
-    }
-    
+
     // Force spawn objects for testing (now uses round-based system)
     forceSpawnTestObjects() {
         debugLog('🎮 *** FORCE SPAWN FUNCTION CALLED (ROUND-BASED MODE) ***');
@@ -3887,11 +3885,15 @@ detectMobileDevice() {
     broadcastEnemyShoot(enemy) {
         if (!this.isHost || !window.socketManager?.socket?.connected) return;
 
+        // Bullet angle needs +PI/2 offset (enemy visual at angle=0 points RIGHT,
+        // but bullet class at angle=0 travels UP)
+        const bulletAngle = enemy.angle + Math.PI / 2;
+
         window.socketManager.socket.emit('enemy-shoot', {
             enemyId: enemy.id,
             x: enemy.x + Math.cos(enemy.angle) * 15,
             y: enemy.y + Math.sin(enemy.angle) * 15,
-            angle: enemy.angle
+            angle: bulletAngle
         });
     }
 

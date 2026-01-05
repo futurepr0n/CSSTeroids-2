@@ -275,13 +275,18 @@ class Enemy {
         if (!this.game.ship || this.game.ship.exploding || this.game.demoMode) {
             return null;
         }
-        
+
         try {
+            // Bullet class uses sin/cos convention where angle=0 points UP
+            // Enemy visual has nose pointing RIGHT at angle=0
+            // So we need to offset by +PI/2 to align bullet direction with visual
+            const bulletAngle = this.angle + Math.PI / 2;
+
             // Create a new bullet with proper parameters
             const bullet = new Bullet(
                 this.x + Math.cos(this.angle) * 15, // Start at the nose of the ship
                 this.y + Math.sin(this.angle) * 15,
-                this.angle,
+                bulletAngle, // Offset angle for bullet travel direction
                 0, // No ship velocity x component
                 0, // No ship velocity y component
                 this.game,
