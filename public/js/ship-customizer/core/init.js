@@ -12,7 +12,7 @@ import { initThrusterMode, clearThrusterPoints, handleThrusterModeClick } from '
 import { initWeaponMode, clearWeaponPoints, handleWeaponModeClick } from '../interaction/weapon-mode.js';
 import { initDrawingModes } from '../drawing/modes.js';
 import { setupPreviewCanvas, startPreviewAnimation } from '../drawing/preview.js';
-import { initSaveButtons, initLoadButton } from '../server/api.js';
+import { initSaveButtons, initLoadButton, loadShipByPassphrase } from '../server/api.js';
 import { createUnifiedClickHandler } from './unified-click-handler.js';
 import '../responsive-canvas.js'; // Import responsive canvas handler
 
@@ -75,7 +75,7 @@ export function initializeApp() {
   
   // 11. Force canvas refresh to ensure everything is properly rendered
   redrawCanvas();
-  
+
   // 12. Log successful initialization
   console.log('Ship Customizer initialized with settings:', {
     name: shipSettings.name,
@@ -83,13 +83,35 @@ export function initializeApp() {
     color: shipSettings.color,
     customLinesCount: shipSettings.customLines.length,
     isMobile: window.shipcustomizer.isMobile,
-    handlersRegistered: Boolean(window.shipcustomizer.handleDesignModeClick && 
-                              window.shipcustomizer.handleThrusterModeClick && 
+    handlersRegistered: Boolean(window.shipcustomizer.handleDesignModeClick &&
+                              window.shipcustomizer.handleThrusterModeClick &&
                               window.shipcustomizer.handleWeaponModeClick)
   });
-  
+
   // Add window resize handler
   window.addEventListener('resize', handleWindowResize);
+
+  // 13. Check for URL passphrase parameter and load ship if present
+  checkUrlPassphrase();
+}
+
+/**
+ * Check URL for passphrase parameter and load the ship if found
+ */
+async function checkUrlPassphrase() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const passphrase = urlParams.get('passphrase');
+
+  if (passphrase) {
+    console.log('Found passphrase in URL:', passphrase);
+    const success = await loadShipByPassphrase(passphrase);
+    if (success) {
+      console.log('Ship loaded from URL passphrase');
+      // Clear the URL parameter to prevent reloading on refresh
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+    }
+  }
 }
 
 /**
