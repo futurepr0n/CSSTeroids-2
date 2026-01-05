@@ -108,7 +108,8 @@ async function saveShip(createNew = false) {
       customLines: Array.isArray(shipSettings.customLines) ? shipSettings.customLines : [],
       thrusterPoints: Array.isArray(shipSettings.thrusterPoints) ? shipSettings.thrusterPoints : [],
       weaponPoints: Array.isArray(shipSettings.weaponPoints) ? shipSettings.weaponPoints : [],
-      passphrase: shipSettings.passphrase
+      passphrase: shipSettings.passphrase,
+      isPublic: shipSettings.isPublic !== undefined ? shipSettings.isPublic : true
     };
     
     // Normalize color values in customLines
@@ -296,6 +297,7 @@ function processLoadedShipData(shipData) {
   shipSettings.thrusterPoints = shipData.thrusterPoints;
   shipSettings.weaponPoints = shipData.weaponPoints;
   shipSettings.passphrase = shipData.passphrase;
+  shipSettings.isPublic = shipData.isPublic !== undefined ? shipData.isPublic : true;
   
   // Update UI
   const shipNameInput = document.getElementById('ship-name');

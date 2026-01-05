@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>CSSTeroids Admin Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #0a0a1a;
+      color: #fff;
+      font-family: 'Arial', sans-serif;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .header {
+      text-align: center;
+      padding: 20px 0;
+      border-bottom: 1px solid #234;
+      margin-bottom: 30px;
+    }
+
+    .header h1 {
+      font-size: 28px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin: 0;
+      color: #f55;
+    }
+
+    .header .subtitle {
+      color: #9ab;
+      margin-top: 10px;
+    }
+
+    /* Login Section */
+    .login-section {
+      max-width: 400px;
+      margin: 100px auto;
+      background: rgba(0, 30, 60, 0.3);
+      padding: 40px;
+      border-radius: 10px;
+      border: 1px solid #234;
+    }
+
+    .login-section h2 {
+      text-align: center;
+      margin-bottom: 30px;
+      color: #0ff;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      color: #9ab;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 12px;
+      background: #123;
+      border: 1px solid #345;
+      border-radius: 5px;
+      color: #fff;
+      font-size: 16px;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #0ff;
+    }
+
+    .btn {
+      background-color: #124;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: bold;
+      font-size: 14px;
+    }
+
+    .btn:hover {
+      background-color: #235;
+      transform: translateY(-2px);
+    }
+
+    .btn-primary {
+      background-color: #1a5a3a;
+      width: 100%;
+    }
+
+    .btn-primary:hover {
+      background-color: #2a6a4a;
+    }
+
+    .btn-danger {
+      background-color: #a33;
+    }
+
+    .btn-danger:hover {
+      background-color: #c44;
+    }
+
+    .btn-small {
+      padding: 8px 16px;
+      font-size: 12px;
+    }
+
+    .error-message {
+      color: #f55;
+      text-align: center;
+      margin-top: 15px;
+      display: none;
+    }
+
+    /* Admin Dashboard */
+    .admin-dashboard {
+      display: none;
+    }
+
+    .admin-dashboard.active {
+      display: block;
+    }
+
+    .dashboard-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 30px;
+    }
+
+    .stats {
+      display: flex;
+      gap: 20px;
+    }
+
+    .stat-box {
+      background: rgba(0, 30, 60, 0.3);
+      padding: 15px 25px;
+      border-radius: 8px;
+      border: 1px solid #234;
+    }
+
+    .stat-box .value {
+      font-size: 24px;
+      font-weight: bold;
+      color: #0ff;
+    }
+
+    .stat-box .label {
+      font-size: 12px;
+      color: #9ab;
+      text-transform: uppercase;
+    }
+
+    /* Ship Gallery */
+    .ship-gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 20px;
+    }
+
+    .ship-card {
+      background: rgba(0, 30, 60, 0.3);
+      border: 1px solid #234;
+      border-radius: 8px;
+      overflow: hidden;
+      transition: all 0.2s;
+    }
+
+    .ship-card:hover {
+      border-color: #456;
+      transform: translateY(-2px);
+    }
+
+    .ship-card.private {
+      border-color: #633;
+      opacity: 0.8;
+    }
+
+    .ship-preview {
+      width: 100%;
+      height: 150px;
+      background: #000;
+      position: relative;
+    }
+
+    .ship-preview canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    .visibility-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+
+    .visibility-badge.public {
+      background: #1a5a3a;
+      color: #8f8;
+    }
+
+    .visibility-badge.private {
+      background: #633;
+      color: #f88;
+    }
+
+    .ship-info {
+      padding: 15px;
+    }
+
+    .ship-name {
+      font-size: 16px;
+      font-weight: bold;
+      margin-bottom: 5px;
+      color: #fff;
+    }
+
+    .ship-passphrase {
+      font-family: monospace;
+      font-size: 12px;
+      color: #0ff;
+      margin-bottom: 10px;
+    }
+
+    .ship-meta {
+      font-size: 11px;
+      color: #789;
+      margin-bottom: 15px;
+    }
+
+    .ship-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .ship-actions button {
+      flex: 1;
+    }
+
+    /* Toggle Switch */
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 50px;
+      height: 26px;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #633;
+      transition: 0.3s;
+      border-radius: 26px;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 20px;
+      width: 20px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+    }
+
+    input:checked + .toggle-slider {
+      background-color: #1a5a3a;
+    }
+
+    input:checked + .toggle-slider:before {
+      transform: translateX(24px);
+    }
+
+    /* Filters */
+    .filters {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .filter-btn {
+      background: rgba(0, 30, 60, 0.3);
+      border: 1px solid #234;
+      color: #9ab;
+      padding: 8px 16px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .filter-btn:hover,
+    .filter-btn.active {
+      background: #124;
+      border-color: #0ff;
+      color: #0ff;
+    }
+
+    /* Modal */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: #0a0a1a;
+      border: 1px solid #234;
+      border-radius: 10px;
+      padding: 30px;
+      max-width: 400px;
+      text-align: center;
+    }
+
+    .modal-content h3 {
+      margin-top: 0;
+      color: #f55;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 15px;
+      margin-top: 25px;
+      justify-content: center;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #9ab;
+    }
+
+    .loading::after {
+      content: '';
+      animation: dots 1.5s infinite;
+    }
+
+    @keyframes dots {
+      0%, 20% { content: '.'; }
+      40% { content: '..'; }
+      60%, 100% { content: '...'; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>CSSTeroids Admin Panel</h1>
+      <p class="subtitle">Ship Gallery Management</p>
+    </div>
+
+    <!-- Login Section -->
+    <div class="login-section" id="login-section">
+      <h2>Admin Login</h2>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary">Login</button>
+        <div class="error-message" id="login-error">Invalid credentials</div>
+      </form>
+    </div>
+
+    <!-- Admin Dashboard -->
+    <div class="admin-dashboard" id="admin-dashboard">
+      <div class="dashboard-header">
+        <div class="stats">
+          <div class="stat-box">
+            <div class="value" id="total-ships">0</div>
+            <div class="label">Total Ships</div>
+          </div>
+          <div class="stat-box">
+            <div class="value" id="public-ships">0</div>
+            <div class="label">Public</div>
+          </div>
+          <div class="stat-box">
+            <div class="value" id="private-ships">0</div>
+            <div class="label">Private</div>
+          </div>
+        </div>
+        <button class="btn btn-danger" id="logout-btn">Logout</button>
+      </div>
+
+      <div class="filters">
+        <button class="filter-btn active" data-filter="all">All Ships</button>
+        <button class="filter-btn" data-filter="public">Public Only</button>
+        <button class="filter-btn" data-filter="private">Private Only</button>
+      </div>
+
+      <div class="ship-gallery" id="ship-gallery">
+        <div class="loading">Loading ships</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Confirmation Modal -->
+  <div class="modal" id="delete-modal">
+    <div class="modal-content">
+      <h3>Delete Ship?</h3>
+      <p>Are you sure you want to delete "<span id="delete-ship-name"></span>"?</p>
+      <p style="color: #f88; font-size: 12px;">This action cannot be undone.</p>
+      <div class="modal-actions">
+        <button class="btn" id="cancel-delete">Cancel</button>
+        <button class="btn btn-danger" id="confirm-delete">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let adminToken = localStorage.getItem('adminToken');
+    let ships = [];
+    let currentFilter = 'all';
+    let shipToDelete = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      if (adminToken) {
+        verifyToken();
+      }
+      initEventListeners();
+    });
+
+    function initEventListeners() {
+      document.getElementById('login-form').addEventListener('submit', handleLogin);
+      document.getElementById('logout-btn').addEventListener('click', handleLogout);
+      document.getElementById('cancel-delete').addEventListener('click', closeDeleteModal);
+      document.getElementById('confirm-delete').addEventListener('click', confirmDelete);
+
+      document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+          e.target.classList.add('active');
+          currentFilter = e.target.dataset.filter;
+          renderShips();
+        });
+      });
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+
+      try {
+        const response = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          adminToken = data.token;
+          localStorage.setItem('adminToken', adminToken);
+          showDashboard();
+          loadShips();
+        } else {
+          showLoginError();
+        }
+      } catch (err) {
+        console.error('Login error:', err);
+        showLoginError();
+      }
+    }
+
+    function showLoginError() {
+      const errorEl = document.getElementById('login-error');
+      errorEl.style.display = 'block';
+      setTimeout(() => errorEl.style.display = 'none', 3000);
+    }
+
+    async function verifyToken() {
+      try {
+        const response = await fetch('/api/admin/verify', {
+          headers: { 'X-Admin-Token': adminToken }
+        });
+
+        if (response.ok) {
+          showDashboard();
+          loadShips();
+        } else {
+          localStorage.removeItem('adminToken');
+          adminToken = null;
+        }
+      } catch (err) {
+        console.error('Token verification error:', err);
+        localStorage.removeItem('adminToken');
+        adminToken = null;
+      }
+    }
+
+    function showDashboard() {
+      document.getElementById('login-section').style.display = 'none';
+      document.getElementById('admin-dashboard').classList.add('active');
+    }
+
+    function handleLogout() {
+      fetch('/api/admin/logout', {
+        method: 'POST',
+        headers: { 'X-Admin-Token': adminToken }
+      });
+
+      localStorage.removeItem('adminToken');
+      adminToken = null;
+      location.reload();
+    }
+
+    async function loadShips() {
+      try {
+        const response = await fetch('/api/admin/ships', {
+          headers: { 'X-Admin-Token': adminToken }
+        });
+
+        if (!response.ok) throw new Error('Failed to load ships');
+
+        ships = await response.json();
+        updateStats();
+        renderShips();
+      } catch (err) {
+        console.error('Error loading ships:', err);
+        document.getElementById('ship-gallery').innerHTML =
+          '<p style="color: #f55;">Error loading ships. Please try again.</p>';
+      }
+    }
+
+    function updateStats() {
+      const publicCount = ships.filter(s => s.isPublic).length;
+      const privateCount = ships.filter(s => !s.isPublic).length;
+
+      document.getElementById('total-ships').textContent = ships.length;
+      document.getElementById('public-ships').textContent = publicCount;
+      document.getElementById('private-ships').textContent = privateCount;
+    }
+
+    function renderShips() {
+      const gallery = document.getElementById('ship-gallery');
+      let filteredShips = ships;
+
+      if (currentFilter === 'public') {
+        filteredShips = ships.filter(s => s.isPublic);
+      } else if (currentFilter === 'private') {
+        filteredShips = ships.filter(s => !s.isPublic);
+      }
+
+      if (filteredShips.length === 0) {
+        gallery.innerHTML = '<p style="color: #9ab;">No ships found.</p>';
+        return;
+      }
+
+      gallery.innerHTML = filteredShips.map(ship => `
+        <div class="ship-card ${ship.isPublic ? '' : 'private'}" data-id="${ship.id}">
+          <div class="ship-preview">
+            <canvas id="canvas-${ship.id}"></canvas>
+            <span class="visibility-badge ${ship.isPublic ? 'public' : 'private'}">
+              ${ship.isPublic ? 'Public' : 'Private'}
+            </span>
+          </div>
+          <div class="ship-info">
+            <div class="ship-name">${escapeHtml(ship.name)}</div>
+            <div class="ship-passphrase">${ship.passphrase}</div>
+            <div class="ship-meta">
+              Created: ${new Date(ship.createdAt).toLocaleDateString()}
+              <br>Lines: ${Array.isArray(ship.customLines) ? ship.customLines.length : 0}
+            </div>
+            <div class="ship-actions">
+              <label class="toggle-switch" title="Toggle visibility">
+                <input type="checkbox" ${ship.isPublic ? 'checked' : ''}
+                  onchange="toggleVisibility(${ship.id}, this.checked)">
+                <span class="toggle-slider"></span>
+              </label>
+              <button class="btn btn-danger btn-small" onclick="showDeleteModal(${ship.id}, '${escapeHtml(ship.name)}')">
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+      filteredShips.forEach(ship => {
+        renderShipPreview(ship);
+      });
+    }
+
+    function renderShipPreview(ship) {
+      const canvas = document.getElementById(`canvas-${ship.id}`);
+      if (!canvas) return;
+
+      const ctx = canvas.getContext('2d');
+      const container = canvas.parentElement;
+
+      canvas.width = container.offsetWidth * 2;
+      canvas.height = container.offsetHeight * 2;
+      ctx.scale(2, 2);
+
+      const width = container.offsetWidth;
+      const height = container.offsetHeight;
+
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.save();
+      ctx.translate(width / 2, height / 2);
+
+      const scale = 0.5;
+      ctx.scale(scale, scale);
+
+      if (ship.type === 'custom' && Array.isArray(ship.customLines) && ship.customLines.length > 0) {
+        ship.customLines.forEach(line => {
+          ctx.beginPath();
+          ctx.moveTo(line.startX, line.startY);
+          ctx.lineTo(line.endX, line.endY);
+          ctx.strokeStyle = line.color || ship.color || '#fff';
+          ctx.lineWidth = 2 / scale;
+          ctx.stroke();
+        });
+      } else {
+        ctx.strokeStyle = ship.color || '#fff';
+        ctx.lineWidth = 2 / scale;
+        ctx.beginPath();
+        ctx.moveTo(0, -40);
+        ctx.lineTo(-25, 40);
+        ctx.lineTo(0, 25);
+        ctx.lineTo(25, 40);
+        ctx.closePath();
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    async function toggleVisibility(shipId, isPublic) {
+      try {
+        const response = await fetch(`/api/admin/ships/${shipId}/visibility`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Token': adminToken
+          },
+          body: JSON.stringify({ isPublic })
+        });
+
+        if (!response.ok) throw new Error('Failed to update visibility');
+
+        const ship = ships.find(s => s.id === shipId);
+        if (ship) {
+          ship.isPublic = isPublic;
+          updateStats();
+          renderShips();
+        }
+      } catch (err) {
+        console.error('Error toggling visibility:', err);
+        alert('Failed to update visibility');
+        loadShips();
+      }
+    }
+
+    function showDeleteModal(shipId, shipName) {
+      shipToDelete = shipId;
+      document.getElementById('delete-ship-name').textContent = shipName;
+      document.getElementById('delete-modal').classList.add('active');
+    }
+
+    function closeDeleteModal() {
+      shipToDelete = null;
+      document.getElementById('delete-modal').classList.remove('active');
+    }
+
+    async function confirmDelete() {
+      if (!shipToDelete) return;
+
+      try {
+        const response = await fetch(`/api/admin/ships/${shipToDelete}`, {
+          method: 'DELETE',
+          headers: { 'X-Admin-Token': adminToken }
+        });
+
+        if (!response.ok) throw new Error('Failed to delete ship');
+
+        ships = ships.filter(s => s.id !== shipToDelete);
+        updateStats();
+        renderShips();
+        closeDeleteModal();
+      } catch (err) {
+        console.error('Error deleting ship:', err);
+        alert('Failed to delete ship');
+        closeDeleteModal();
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

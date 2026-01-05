@@ -67,16 +67,19 @@ export function initializeApp() {
   
   // 9. Initialize the global clear button
   initGlobalClearButton();
-  
-  // 10. Mobile-specific initializations
+
+  // 10. Initialize visibility toggle
+  initVisibilityToggle();
+
+  // 11. Mobile-specific initializations
   if (window.shipcustomizer.isMobile) {
     initMobileSpecificFeatures();
   }
-  
-  // 11. Force canvas refresh to ensure everything is properly rendered
+
+  // 12. Force canvas refresh to ensure everything is properly rendered
   redrawCanvas();
 
-  // 12. Log successful initialization
+  // 13. Log successful initialization
   console.log('Ship Customizer initialized with settings:', {
     name: shipSettings.name,
     type: shipSettings.type,
@@ -91,7 +94,7 @@ export function initializeApp() {
   // Add window resize handler
   window.addEventListener('resize', handleWindowResize);
 
-  // 13. Check for URL passphrase parameter and load ship if present
+  // 14. Check for URL passphrase parameter and load ship if present
   checkUrlPassphrase();
 }
 
@@ -207,6 +210,28 @@ function handleWindowResize() {
   detectMobileDevice();
   
   // The responsive-canvas module will handle the canvas resizing
+}
+
+/**
+ * Initialize visibility toggle
+ */
+function initVisibilityToggle() {
+  const visibilityToggle = document.getElementById('ship-visibility');
+  const visibilityHint = document.getElementById('visibility-hint');
+
+  if (visibilityToggle) {
+    visibilityToggle.addEventListener('change', (e) => {
+      shipSettings.isPublic = e.target.checked;
+
+      if (visibilityHint) {
+        visibilityHint.textContent = e.target.checked
+          ? 'Ship will appear in public gallery'
+          : 'Ship is private - only accessible via passphrase';
+      }
+
+      console.log('Ship visibility changed to:', shipSettings.isPublic ? 'public' : 'private');
+    });
+  }
 }
 
 // Create helpful toast notification function

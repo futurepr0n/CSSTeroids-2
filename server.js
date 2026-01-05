@@ -35,11 +35,13 @@ const db = require('./models');
 // Import routes
 const shipRoutes = require('./routes/ships');
 const multiplayerRoutes = require('./routes/multiplayer');
+const adminRoutes = require('./routes/admin');
 
 // Use routes
 app.use('/api/ships', shipRoutes);
 app.use('/api/high-scores', highScoreRoutes);
 app.use('/api/multiplayer', multiplayerRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Test endpoint for connectivity
 app.get('/api/test', (req, res) => {
@@ -826,10 +828,15 @@ app.get('/minimal', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'minimal-ships.html'));
 });
 
+// Admin panel
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
 // Sync database and start server
-db.sequelize.sync()
+db.sequelize.sync({ alter: true })
   .then(() => {
-    console.log('Database connected successfully');
+    console.log('Database connected and synced successfully');
     startServer();
   })
   .catch(err => {

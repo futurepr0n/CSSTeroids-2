@@ -17,7 +17,8 @@ export const shipSettings = {
   customLines: [],
   thrusterPoints: [],
   weaponPoints: [],
-  passphrase: null
+  passphrase: null,
+  isPublic: true
 };
 
 // Drawing state - initialize with objects to avoid null references
@@ -74,9 +75,13 @@ export function loadSavedSettings() {
         shipSettings.passphrase = parsed.passphrase;
         const shipPassphraseDisplay = document.getElementById('ship-passphrase');
         const savedShipContainer = document.getElementById('saved-ship-container');
-        
+
         if (shipPassphraseDisplay) shipPassphraseDisplay.textContent = parsed.passphrase;
         if (savedShipContainer) savedShipContainer.style.display = 'block';
+      }
+
+      if (parsed.isPublic !== undefined) {
+        shipSettings.isPublic = parsed.isPublic;
       }
       
       // IMPORTANT: Create new arrays to avoid reference issues
@@ -160,14 +165,26 @@ export function updateUIFromSettings() {
   // Update passphrase display if available
   const shipPassphraseDisplay = document.getElementById('ship-passphrase');
   const savedShipContainer = document.getElementById('saved-ship-container');
-  
+
   if (shipSettings.passphrase) {
     if (shipPassphraseDisplay) shipPassphraseDisplay.textContent = shipSettings.passphrase;
     if (savedShipContainer) savedShipContainer.style.display = 'block';
   } else {
     if (savedShipContainer) savedShipContainer.style.display = 'none';
   }
-  
+
+  // Update visibility toggle
+  const visibilityToggle = document.getElementById('ship-visibility');
+  const visibilityHint = document.getElementById('visibility-hint');
+  if (visibilityToggle) {
+    visibilityToggle.checked = shipSettings.isPublic;
+    if (visibilityHint) {
+      visibilityHint.textContent = shipSettings.isPublic
+        ? 'Ship will appear in public gallery'
+        : 'Ship is private - only accessible via passphrase';
+    }
+  }
+
   // Update point counts
   updatePointCounts();
 }
@@ -233,7 +250,8 @@ export function saveShipToLocalStorage() {
       customLines: [...shipSettings.customLines],
       thrusterPoints: [...shipSettings.thrusterPoints],
       weaponPoints: [...shipSettings.weaponPoints],
-      passphrase: shipSettings.passphrase
+      passphrase: shipSettings.passphrase,
+      isPublic: shipSettings.isPublic
     };
     
     console.log("Saving ship with:", {

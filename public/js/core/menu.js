@@ -611,9 +611,9 @@ async showShipGallery() {
     const shipName = document.getElementById('galleryShipName');
     if (shipName) shipName.textContent = 'Loading ships...';
 
-    // Fetch all ships from the server
+    // Fetch public ships from the server
     try {
-        const response = await fetch('/api/ships');
+        const response = await fetch('/api/ships/public');
         if (!response.ok) {
             throw new Error(`Server error: ${response.status}`);
         }
