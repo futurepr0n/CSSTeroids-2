@@ -1,4 +1,12 @@
 //public/js/core/game.js
+
+// Debug logging system - set to false to disable verbose console output
+// Toggle with: window.DEBUG_LOG = true in browser console
+window.DEBUG_LOG = false;
+window.debugLog = function(...args) {
+    if (window.DEBUG_LOG) console.log(...args);
+};
+
 class Game {
     constructor() {
         // Canvas setup
@@ -46,6 +54,9 @@ class Game {
         this.lastSyncTime = 0;
         this.syncInterval = 1000 / 20; // 20 FPS sync rate
         this.handlersRegistered = false; // Track if socket event handlers are registered
+        this.multiplayerRound = 1; // Current round in multiplayer mode
+        this.roundTransitioning = false; // Prevent multiple round transitions
+        this.multiplayerRoundStarted = false; // Track if current round has started spawning asteroids
         
 
         // Add these properties to the Game constructor
@@ -81,8 +92,8 @@ class Game {
     }
     
     init(demoMode = false) {
-        console.log('🎮 GAME: ⭐ GAME.INIT() CALLED ⭐');
-        console.log('🎮 GAME: Init called with params:', {
+        debugLog('🎮 GAME: ⭐ GAME.INIT() CALLED ⭐');
+        debugLog('🎮 GAME: Init called with params:', {
             demoMode,
             isMultiplayer: this.isMultiplayer(),
             sessionId: this.sessionId,
@@ -100,6 +111,11 @@ class Game {
         }
         this.score = 0;
         this.level = 1;
+        this.multiplayerRound = 1; // Always start at Round 1
+        this.roundTransitioning = false; // Reset round transition flag
+        this.multiplayerRoundStarted = false; // Reset round started flag
+        this._gameStartedHandled = false; // Reset game started handler flag
+        this._initialSpawnScheduled = false; // Prevent duplicate initial spawns
         this.asteroids = [];
         this.bullets = [];
         this.debris = [];
@@ -119,7 +135,7 @@ class Game {
             shipX = this.canvas.width / 2;
             shipY = this.canvas.height / 2;
         }
-        console.log('🚀 INIT: Creating player ship at:', shipX, shipY, 'mode:', this.mode, 'sessionId:', this.sessionId, 'playerId:', this.playerId);
+        debugLog('🚀 INIT: Creating player ship at:', shipX, shipY, 'mode:', this.mode, 'sessionId:', this.sessionId, 'playerId:', this.playerId);
         this.ship = new Ship(shipX, shipY, this);
         
         // In multiplayer mode, ensure unique player names
@@ -128,7 +144,7 @@ class Game {
                 this.ship.playerName = `Player ${this.playerId.substr(-4)}`;
             }
             this.ship.playerId = this.playerId; // Ensure ship has the player ID
-            console.log('🚀 INIT: Ship created for multiplayer player:', {
+            debugLog('🚀 INIT: Ship created for multiplayer player:', {
                 playerId: this.ship.playerId,
                 playerName: this.ship.playerName,
                 position: { x: this.ship.x, y: this.ship.y },
@@ -136,7 +152,7 @@ class Game {
                 isHost: this.isHost
             });
         } else {
-            console.log('🚀 INIT: Ship created for singleplayer');
+            debugLog('🚀 INIT: Ship created for singleplayer');
         }
         
         // Set camera to follow ship in multiplayer mode
@@ -159,7 +175,7 @@ class Game {
           this.showLevelMessage();
           
           // SIMPLIFIED MVP: No asteroids or enemies in multiplayer mode
-          console.log('🌍 INIT: Checking if should create game objects:', {
+          debugLog('🌍 INIT: Checking if should create game objects:', {
             isMultiplayer: this.isMultiplayer(),
             isHost: this.isHost,
             sessionId: this.sessionId,
@@ -168,17 +184,17 @@ class Game {
           });
           
           if (!this.isMultiplayer()) {
-            console.log('🌍 INIT: Creating asteroids and enemies (Single Player only)');
+            debugLog('🌍 INIT: Creating asteroids and enemies (Single Player only)');
             this.createAsteroidsForLevel();
             this.createEnemiesForLevel();
             
-            console.log('🌍 INIT: Game objects created:', {
+            debugLog('🌍 INIT: Game objects created:', {
               asteroidCount: this.asteroids.length,
               enemyCount: this.enemies.length
             });
           } else {
-            console.log('🌍 INIT: 🚀 MULTIPLAYER MVP MODE - No asteroids/enemies, just ships! 🚀');
-            console.log('🌍 INIT: Focus on ship-to-ship synchronization only');
+            debugLog('🌍 INIT: 🚀 MULTIPLAYER MVP MODE - No asteroids/enemies, just ships! 🚀');
+            debugLog('🌍 INIT: Focus on ship-to-ship synchronization only');
             // Clear any existing asteroids/enemies to ensure clean multiplayer
             this.asteroids = [];
             this.enemies = [];
@@ -190,8 +206,8 @@ class Game {
         
         // Initialize multiplayer synchronization if in multiplayer mode
         if (this.isMultiplayer()) {
-            console.log('Game is in multiplayer mode - initializing sync system...');
-            console.log('Player ship details:', {
+            debugLog('Game is in multiplayer mode - initializing sync system...');
+            debugLog('Player ship details:', {
                 playerName: this.ship.playerName,
                 playerId: this.playerId,
                 position: { x: this.ship.x, y: this.ship.y },
@@ -223,9 +239,9 @@ detectMobileDevice() {
     // Check if touch controls script is loaded
     if (window.initTouchControls) {
       this.touchControls = window.initTouchControls(this);
-      console.log('Touch controls initialized');
+      debugLog('Touch controls initialized');
     } else {
-      console.log('Touch controls not available');
+      debugLog('Touch controls not available');
       
       // If on mobile but touch controls not loaded, try to load them
       if (this.isMobileDevice) {
@@ -238,7 +254,7 @@ detectMobileDevice() {
     const script = document.createElement('script');
     script.src = 'js/core/mobile-controls.js';
     script.onload = () => {
-      console.log('Touch controls script loaded');
+      debugLog('Touch controls script loaded');
       this.initTouchControls();
     };
     script.onerror = (err) => {
@@ -323,7 +339,7 @@ detectMobileDevice() {
     
     toggleCollisionDebug() {
         window.DEBUG_COLLISIONS = !window.DEBUG_COLLISIONS;
-        console.log("Collision debugging:", window.DEBUG_COLLISIONS ? "enabled" : "disabled");
+        debugLog("Collision debugging:", window.DEBUG_COLLISIONS ? "enabled" : "disabled");
     }
     
     gameLoop(timestamp) {
@@ -414,15 +430,66 @@ detectMobileDevice() {
         
         // Update enemies
         for (let i = this.enemies.length - 1; i >= 0; i--) {
-            this.enemies[i].update(dt);
+            const enemy = this.enemies[i];
+            if (!enemy.active) continue; // Skip inactive enemies
+
+            if (enemy.isMultiplayerEnemy && this.isHost) {
+                enemy.multiplayerUpdate(dt);
+            } else if (enemy.isClientControlled) {
+                // Client: interpolate towards server position for smooth movement
+                enemy.interpolatePosition(dt);
+            } else {
+                enemy.update(dt);
+            }
         }
-        
+
+        // Broadcast enemy states periodically (host only, ~10 FPS)
+        if (this.isHost && this.isMultiplayer()) {
+            this._enemyBroadcastTimer = (this._enemyBroadcastTimer || 0) + dt;
+            if (this._enemyBroadcastTimer >= 0.1) {
+                this._enemyBroadcastTimer = 0;
+                this.broadcastEnemyStates();
+            }
+        }
+
         // Handle collisions
         this.checkCollisions();
-        
-        // Check if level is complete (disabled in multiplayer mode for now)
-        if (!this.demoMode && !this.isMultiplayer() && this.asteroids.length === 0 && this.enemies.length === 0 && !this.ship.exploding) {
-            this.nextLevel();
+
+        // Check if level/round is complete
+        if (!this.demoMode && !this.ship.exploding) {
+            if (this.isMultiplayer()) {
+                // Multiplayer: Check round completion (host only)
+                // One-time log when asteroids reach 0
+                // Count multiplayer enemies (only those, not single-player enemies)
+                const multiplayerEnemyCount = this.enemies.filter(e => e.isMultiplayerEnemy && e.active).length;
+
+                if (this.asteroids.length === 0 && multiplayerEnemyCount === 0 && !this._asteroidsZeroLogged) {
+                    debugLog('⚠️ ROUND COMPLETE CHECK - Checking conditions:', {
+                        isHost: this.isHost,
+                        roundStarted: this.multiplayerRoundStarted,
+                        asteroidsLength: this.asteroids.length,
+                        enemyCount: multiplayerEnemyCount,
+                        transitioning: this.roundTransitioning,
+                        willComplete: this.isHost && this.multiplayerRoundStarted && !this.roundTransitioning
+                    });
+                    this._asteroidsZeroLogged = true;
+                }
+
+                if (this.isHost &&
+                    this.multiplayerRoundStarted &&
+                    this.asteroids.length === 0 &&
+                    multiplayerEnemyCount === 0 &&
+                    !this.roundTransitioning) {
+                    debugLog('🏆 HOST: Calling completeMultiplayerRound()');
+                    this._asteroidsZeroLogged = false; // Reset for next round
+                    this.completeMultiplayerRound();
+                }
+            } else {
+                // Singleplayer: Check level completion
+                if (this.asteroids.length === 0 && this.enemies.length === 0) {
+                    this.nextLevel();
+                }
+            }
         }
     }
     
@@ -457,7 +524,19 @@ detectMobileDevice() {
           const bullets = this.ship.shoot();
           if (bullets) {
             this.bullets = this.bullets.concat(bullets);
-            
+
+            // Check for enemy aggro when shooting (bullet proximity aggro system)
+            if (this.isMultiplayer() && bullets.length > 0) {
+              for (const enemy of this.enemies) {
+                if (enemy.active && enemy.checkBulletAggro) {
+                  // Check each bullet for aggro - 'main' identifies this as the local player
+                  for (const bullet of bullets) {
+                    enemy.checkBulletAggro(bullet.x, bullet.y, 'main');
+                  }
+                }
+              }
+            }
+
             // Broadcast shooting action in multiplayer (deterministic approach)
             if (this.isMultiplayer() && window.socketManager?.socket?.connected) {
               // Send the shoot action with ship state at time of firing
@@ -469,7 +548,7 @@ detectMobileDevice() {
                 weaponPoints: this.ship.weaponPoints || [],
                 timestamp: Date.now()
               };
-              console.log('🔫 SENDING player-shoot:', shootData);
+              debugLog('🔫 SENDING player-shoot:', shootData);
               window.socketManager.socket.emit('player-shoot', shootData);
             }
           }
@@ -504,7 +583,7 @@ detectMobileDevice() {
             if (!this.ownShipLogCount) this.ownShipLogCount = 0;
             this.ownShipLogCount++;
             if (this.ownShipLogCount <= 5 || this.ownShipLogCount % 300 === 0) {
-                console.log('🎨 RENDER: Drawing own ship:', {
+                debugLog('🎨 RENDER: Drawing own ship:', {
                     x: this.ship.x,
                     y: this.ship.y,
                     rotation: this.ship.rotation,
@@ -575,22 +654,49 @@ detectMobileDevice() {
                             }
                         });
                         
-                        // Draw custom thruster points if thrusting
-                        if (player.thrusting && player.shipData.thrusterPoints) {
-                            player.shipData.thrusterPoints.forEach(point => {
-                                // Draw thruster flame
-                                const flicker = Math.random() * 0.3 + 0.7;
-                                const length = 15 * 0.6 * flicker;
-                                const width = 15 * 0.3 * flicker;
-                                
-                                this.ctx.fillStyle = 'orange';
+                        // Draw thruster flames if thrusting
+                        if (player.thrusting) {
+                            const flicker = Math.random() * 0.3 + 0.7;
+                            const length = 15 * 0.6 * flicker;
+                            const width = 15 * 0.3 * flicker;
+
+                            // Helper function to draw a thruster flame at a point
+                            const drawThrusterFlame = (x, y) => {
+                                const gradient = this.ctx.createLinearGradient(x, y, x, y + length);
+                                gradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+                                gradient.addColorStop(0.3, 'rgba(255, 165, 0, 0.7)');
+                                gradient.addColorStop(0.8, 'rgba(255, 0, 0, 0.5)');
+                                gradient.addColorStop(1, 'rgba(100, 0, 0, 0)');
+
                                 this.ctx.beginPath();
-                                this.ctx.moveTo(point.x * 0.25, point.y * 0.25);
-                                this.ctx.lineTo(point.x * 0.25 - width / 2, point.y * 0.25 + length);
-                                this.ctx.lineTo(point.x * 0.25 + width / 2, point.y * 0.25 + length);
+                                this.ctx.moveTo(x, y);
+                                this.ctx.lineTo(x - width / 2, y + length);
+                                this.ctx.lineTo(x + width / 2, y + length);
                                 this.ctx.closePath();
+                                this.ctx.fillStyle = gradient;
                                 this.ctx.fill();
-                            });
+                            };
+
+                            // Use custom thruster points if available
+                            if (player.shipData.thrusterPoints && player.shipData.thrusterPoints.length > 0) {
+                                player.shipData.thrusterPoints.forEach(point => {
+                                    drawThrusterFlame(point.x * 0.25, point.y * 0.25);
+                                });
+                            } else {
+                                // Fallback: find lowest points of custom ship (like ship.js does)
+                                let lowestPoints = [];
+                                customLines.forEach(line => {
+                                    lowestPoints.push({ x: line.startX, y: line.startY });
+                                    lowestPoints.push({ x: line.endX, y: line.endY });
+                                });
+                                lowestPoints.sort((a, b) => b.y - a.y);
+                                const threshold = lowestPoints[0].y - 20;
+                                lowestPoints = lowestPoints.filter(p => p.y >= threshold).slice(0, 3);
+
+                                lowestPoints.forEach(point => {
+                                    drawThrusterFlame(point.x * 0.25, point.y * 0.25);
+                                });
+                            }
                         }
                     } else {
                         // Draw default ship shape (corrected orientation to match Ship class)
@@ -603,15 +709,27 @@ detectMobileDevice() {
                         this.ctx.lineTo(10.5, 10.5); // Bottom right
                         this.ctx.closePath();
                         this.ctx.stroke();
-                        
-                        // Draw thruster if active
+
+                        // Draw thruster if active - pointing backward (+Y direction)
                         if (player.thrusting) {
-                            this.ctx.strokeStyle = '#ffaa00';
+                            const flicker = Math.random() * 0.3 + 0.7;
+                            const length = 15 * 0.6 * flicker;
+                            const width = 15 * 0.3 * flicker;
+                            const y = 10.5; // At the back of the ship
+
+                            const gradient = this.ctx.createLinearGradient(0, y, 0, y + length);
+                            gradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+                            gradient.addColorStop(0.3, 'rgba(255, 165, 0, 0.7)');
+                            gradient.addColorStop(0.8, 'rgba(255, 0, 0, 0.5)');
+                            gradient.addColorStop(1, 'rgba(100, 0, 0, 0)');
+
                             this.ctx.beginPath();
-                            this.ctx.moveTo(-5, -4);
-                            this.ctx.lineTo(-15, 0);
-                            this.ctx.lineTo(-5, 4);
-                            this.ctx.stroke();
+                            this.ctx.moveTo(0, y);
+                            this.ctx.lineTo(-width / 2, y + length);
+                            this.ctx.lineTo(width / 2, y + length);
+                            this.ctx.closePath();
+                            this.ctx.fillStyle = gradient;
+                            this.ctx.fill();
                         }
                     }
                     
@@ -635,7 +753,7 @@ detectMobileDevice() {
         
         // Draw asteroids
         if (this.asteroids.length > 0) {
-            console.log('🎨 RENDER: Drawing', this.asteroids.length, 'asteroids', {
+            debugLog('🎨 RENDER: Drawing', this.asteroids.length, 'asteroids', {
                 isHost: this.isHost,
                 isMultiplayer: this.isMultiplayer(),
                 firstAsteroidPos: this.asteroids[0] ? { x: this.asteroids[0].x, y: this.asteroids[0].y } : 'none'
@@ -864,11 +982,11 @@ detectMobileDevice() {
             yPos += 25;
         }
         
-        // Top-center: Level info (prominent)
+        // Top-center: Round info (prominent) - use multiplayerRound for multiplayer
         this.ctx.fillStyle = '#ffff00';
         this.ctx.font = 'bold 24px Arial';
         this.ctx.textAlign = 'center';
-        this.ctx.fillText(`LEVEL ${this.level}`, this.canvas.width / 2, 35);
+        this.ctx.fillText(`ROUND ${this.multiplayerRound}`, this.canvas.width / 2, 35);
         
         // Top-right: Game stats
         this.ctx.fillStyle = 'white';
@@ -937,7 +1055,7 @@ detectMobileDevice() {
         for (const asteroid of this.asteroids) {
             // Use the enhanced collision detection on the ship
             if (this.ship.checkCollision(asteroid)) {
-                console.log("Ship collided with asteroid");
+                debugLog("Ship collided with asteroid");
                 
                 // Only process the hit if the ship is not invulnerable
                 if (!this.ship.invulnerable) {
@@ -953,25 +1071,52 @@ detectMobileDevice() {
                         }
                     }
                 } else {
-                    console.log("Ship is invulnerable, ignoring asteroid collision");
+                    debugLog("Ship is invulnerable, ignoring asteroid collision");
                 }
             }
         }
         
-        // Check ship collision with enemies
-        for (const enemy of this.enemies) {
+        // Check ship collision with enemies - mutual destruction
+        for (let i = this.enemies.length - 1; i >= 0; i--) {
+            const enemy = this.enemies[i];
             // Use the enhanced collision detection on the ship
             if (this.ship.checkCollision(enemy)) {
-                console.log("Ship collided with enemy");
-                
-                // Only process the hit if the ship is not invulnerable
+                debugLog("Ship collided with enemy - mutual destruction");
+
+                // Destroy the enemy ship regardless of player invulnerability
+                const enemyX = enemy.x;
+                const enemyY = enemy.y;
+                const enemyId = enemy.id;
+                enemy.hit();
+                this.enemies.splice(i, 1);
+
+                // Broadcast enemy destruction in multiplayer
+                if (this.isMultiplayer() && window.socketManager?.socket?.connected) {
+                    window.socketManager.socket.emit('enemy-destroyed', {
+                        enemyId: enemyId,
+                        x: enemyX,
+                        y: enemyY,
+                        reason: 'collision'
+                    });
+                }
+
+                // Only damage the player if not invulnerable
                 if (!this.ship.invulnerable) {
                     if (this.ship.hit()) {
+                        // Broadcast ship explosion to other clients in multiplayer
+                        if (this.isMultiplayer() && window.socketManager?.socket?.connected) {
+                            window.socketManager.socket.emit('ship-explosion', {
+                                playerId: this.playerId,
+                                x: this.ship.x,
+                                y: this.ship.y,
+                                timestamp: Date.now()
+                            });
+                        }
                         // We break after a successful hit to prevent multiple hits in one frame
                         break;
                     }
                 } else {
-                    console.log("Ship is invulnerable, ignoring enemy collision");
+                    debugLog("Ship is invulnerable, enemy destroyed but player survives");
                 }
             }
         }
@@ -990,16 +1135,27 @@ detectMobileDevice() {
             if (bullet.source === 'enemy') {
                 // Skip if player ship is invulnerable or exploding
                 if (this.ship.invulnerable || this.ship.exploding) continue;
-                
+
                 // Use enhanced collision detection
                 if (this.ship.checkCollision(bullet)) {
-                    console.log("Enemy bullet hit player ship");
-                    
+                    debugLog("Enemy bullet hit player ship");
+
                     // Remove bullet
                     this.bullets.splice(i, 1);
-                    
-                    // Damage player
-                    this.ship.hit();
+
+                    // Damage player and broadcast explosion to other clients
+                    if (this.ship.hit()) {
+                        debugLog(`💥 Ship hit by enemy bullet at (${this.ship.x.toFixed(0)}, ${this.ship.y.toFixed(0)})`);
+                        if (this.isMultiplayer() && window.socketManager?.socket?.connected) {
+                            debugLog(`💥 Broadcasting ship-explosion event`);
+                            window.socketManager.socket.emit('ship-explosion', {
+                                playerId: this.playerId,
+                                x: this.ship.x,
+                                y: this.ship.y,
+                                timestamp: Date.now()
+                            });
+                        }
+                    }
                     continue; // Skip to next bullet
                 }
             } 
@@ -1017,7 +1173,7 @@ detectMobileDevice() {
                     );
                     
                     if (distance < bullet.radius + asteroid.radius) {
-                        console.log("Bullet hit asteroid");
+                        debugLog("Bullet hit asteroid");
                         
                         // Remove bullet
                         this.bullets.splice(i, 1);
@@ -1042,26 +1198,34 @@ detectMobileDevice() {
                 // Now check against enemies
                 for (let j = this.enemies.length - 1; j >= 0; j--) {
                     const enemy = this.enemies[j];
-                    
+
                     const distance = Math.sqrt(
-                        Math.pow(bullet.x - enemy.x, 2) + 
+                        Math.pow(bullet.x - enemy.x, 2) +
                         Math.pow(bullet.y - enemy.y, 2)
                     );
-                    
+
                     if (distance < bullet.radius + enemy.radius) {
-                        console.log("Bullet hit enemy");
-                        
+                        debugLog("Bullet hit enemy");
+
                         // Remove bullet
                         this.bullets.splice(i, 1);
-                        
-                        // If this is a mathematical enemy, broadcast its destruction
-                        if (enemy.isMathematical && enemy.id) {
+
+                        // Handle multiplayer enemy damage
+                        if (enemy.isMultiplayerEnemy && this.isHost) {
+                            const destroyed = enemy.takeDamage();
+                            if (destroyed) {
+                                this.broadcastEnemyDestroyedEvent(enemy);
+                                this.destroyEnemy(j);
+                            }
+                        } else if (enemy.isMathematical && enemy.id) {
+                            // Mathematical enemy (old system)
                             this.broadcastObjectDestroyed('enemy', enemy.id);
+                            this.destroyEnemy(j);
+                        } else {
+                            // Single player enemy
+                            this.destroyEnemy(j);
                         }
-                        
-                        // Destroy enemy
-                        this.destroyEnemy(j);
-                        
+
                         // Mark bullet as destroyed to skip enemy loop
                         bulletDestroyed = true;
                         break;
@@ -1105,14 +1269,14 @@ detectMobileDevice() {
     
     splitAsteroid(index) {
         const asteroid = this.asteroids[index];
-        
+
         // Add score based on asteroid size
         this.score += (4 - asteroid.size) * 100;
         this.updateUI();
-        
+
         // Create debris
         this.createDebrisFromAsteroid(asteroid);
-        
+
         // In multiplayer mode, asteroids are destroyed directly without splitting
         // In singleplayer mode, split into smaller asteroids if not smallest size
         if (!this.isMultiplayer() && asteroid.size > 1) {
@@ -1125,9 +1289,11 @@ detectMobileDevice() {
                 ));
             }
         }
-        
+
         // Remove the original asteroid
+        debugLog(`💥 Removing asteroid at index ${index}, ID: ${asteroid.id}, asteroids before: ${this.asteroids.length}`);
         this.asteroids.splice(index, 1);
+        debugLog(`💥 Asteroids after removal: ${this.asteroids.length}`);
     }
     
     createDebrisFromAsteroid(asteroid) {
@@ -1146,25 +1312,35 @@ detectMobileDevice() {
     }
     
     createDebrisFromShip() {
+        // Validate ship position to prevent NaN issues
+        if (!this.ship || !isFinite(this.ship.x) || !isFinite(this.ship.y)) {
+            debugLog('createDebrisFromShip: Invalid ship position, skipping debris');
+            return;
+        }
+
         const numParticles = 20;
-        
+        const shipX = this.ship.x;
+        const shipY = this.ship.y;
+
+        debugLog(`Creating ship debris at (${shipX.toFixed(0)}, ${shipY.toFixed(0)})`);
+
         for (let i = 0; i < numParticles; i++) {
             const debris = new Debris(
-                this.ship.x,
-                this.ship.y,
+                shipX,
+                shipY,
                 Math.random() * Math.PI * 2,
                 this
             );
-            
+
             // Make ship debris more colorful
             debris.color = i % 2 === 0 ? 'orange' : 'red';
-            
+
             this.debris.push(debris);
         }
     }
     
     resetShip() {
-        console.log("Resetting ship position and properties");
+        debugLog("Resetting ship position and properties");
         
         // Reset position to center of screen
         this.x = this.game.canvas.width / 2;
@@ -1192,18 +1368,18 @@ detectMobileDevice() {
         this.blinkTime = 0;
         this.blinkOn = true;
         
-        console.log("Ship reset complete");
+        debugLog("Ship reset complete");
     }
     
     respawnShip() {
-        console.log("Respawning ship, current lives:", this.lives);
+        debugLog("Respawning ship, current lives:", this.lives);
         
         // In multiplayer, only the host manages shared lives
         if (this.isMultiplayer()) {
             if (this.isHost) {
                 // Host decreases shared lives and broadcasts the update
                 this.lives--;
-                console.log("Host decreased shared lives to:", this.lives);
+                debugLog("Host decreased shared lives to:", this.lives);
                 
                 // Broadcast life update to all players
                 if (window.socketManager && this.sessionId) {
@@ -1223,11 +1399,11 @@ detectMobileDevice() {
         // Update UI to show new lives count
         this.updateUI();
         
-        console.log("Lives remaining:", this.lives);
+        debugLog("Lives remaining:", this.lives);
         
         // Check if game over (shared lives exhausted)
         if (this.lives <= 0) {
-            console.log("Game over - no lives remaining");
+            debugLog("Game over - no lives remaining");
             
             if (this.isMultiplayer() && this.isHost) {
                 // Host broadcasts game over to all players
@@ -1249,7 +1425,7 @@ detectMobileDevice() {
             this.ship.visible = true;
             this.ship.invulnerable = true;
             this.ship.invulnerableTime = 3; // 3 seconds of invulnerability
-            console.log("Ship reset and invulnerable");
+            debugLog("Ship reset and invulnerable");
             this.cleanupTouchControls();
             this.initTouchControls();
         } else {
@@ -1262,7 +1438,7 @@ detectMobileDevice() {
                 this.camera.followTarget = this.ship;
             }
             
-            console.log("Created new ship instance");
+            debugLog("Created new ship instance");
         }
     }
     
@@ -1325,8 +1501,17 @@ detectMobileDevice() {
     }
     
     showLevelMessage() {
+        // Update the level message text based on game mode
+        if (this.isMultiplayer()) {
+            this.levelMessage.innerHTML = `Round&nbsp;<span id="levelNumber">${this.multiplayerRound}</span>`;
+        } else {
+            this.levelMessage.innerHTML = `Level&nbsp;<span id="levelNumber">${this.level}</span>`;
+        }
+        // Update reference to levelNumber element
+        this.levelNumber = document.getElementById('levelNumber');
+
         this.levelMessage.style.display = 'flex';
-        
+
         // Hide after 2 seconds
         setTimeout(() => {
             this.levelMessage.style.display = 'none';
@@ -1418,10 +1603,13 @@ detectMobileDevice() {
         const scoreElement = document.getElementById('score');
         const livesElement = document.getElementById('lives');
         const levelElement = document.getElementById('level');
-        
+
         if (scoreElement) scoreElement.textContent = this.score;
         if (livesElement) livesElement.textContent = this.lives;
-        if (levelElement) levelElement.textContent = this.level;
+        if (levelElement) {
+            // In multiplayer, show round number; in singleplayer, show level
+            levelElement.textContent = this.isMultiplayer() ? this.multiplayerRound : this.level;
+        }
     }
     
     // Game mode configuration methods
@@ -1441,19 +1629,19 @@ detectMobileDevice() {
             this.initializeMultiplayerSync();
             
             // Schedule object spawning for multiplayer
-            console.log('🎮 MULTIPLAYER MODE: Scheduling spawn in 2 seconds...');
+            debugLog('🎮 MULTIPLAYER MODE: Scheduling spawn in 2 seconds...');
             setTimeout(() => {
-                console.log('🎮 MULTIPLAYER MODE: Calling forceSpawnTestObjects from setGameMode');
+                debugLog('🎮 MULTIPLAYER MODE: Calling forceSpawnTestObjects from setGameMode');
                 this.forceSpawnTestObjects();
             }, 2000);
             
-            console.log(`Game mode set to multiplayer with world bounds: ${this.worldBounds.width}x${this.worldBounds.height}`);
+            debugLog(`Game mode set to multiplayer with world bounds: ${this.worldBounds.width}x${this.worldBounds.height}`);
         } else {
             this.worldBounds.enabled = false;
             this.camera.enabled = false;
             this.camera.x = 0;
             this.camera.y = 0;
-            console.log('Game mode set to singleplayer (screen wrapping enabled)');
+            debugLog('Game mode set to singleplayer (screen wrapping enabled)');
         }
     }
     
@@ -1579,10 +1767,10 @@ detectMobileDevice() {
 
     // Multiplayer synchronization methods - SIMPLIFIED VERSION
     initializeMultiplayerSync() {
-        console.log('🔧 SYNC: initializeMultiplayerSync called - USING SIMPLE APPROACH');
+        debugLog('🔧 SYNC: initializeMultiplayerSync called - USING SIMPLE APPROACH');
         
         if (!this.isMultiplayer()) {
-            console.log('Skipping multiplayer sync - not in multiplayer mode');
+            debugLog('Skipping multiplayer sync - not in multiplayer mode');
             return;
         }
         
@@ -1592,12 +1780,12 @@ detectMobileDevice() {
         // Set up VERY simple sync exactly like the minimal test
         this.setupVerySimpleSync();
         
-        console.log('✅ Simple multiplayer sync initialized');
+        debugLog('✅ Simple multiplayer sync initialized');
     }
     
     // Simplified ship sync that works like test-two-ships.html
     setupVerySimpleSync() {
-        console.log('🔧 Setting up simplified ship sync...');
+        debugLog('🔧 Setting up simplified ship sync...');
         
         if (!window.socketManager || !window.socketManager.socket) {
             console.error('No socket manager available for sync');
@@ -1607,7 +1795,7 @@ detectMobileDevice() {
         // Ensure we have a playerId (use socket ID if not set)
         if (!this.playerId && window.socketManager.socket.id) {
             this.playerId = window.socketManager.socket.id;
-            console.log('🔧 Set playerId from socket:', this.playerId);
+            debugLog('🔧 Set playerId from socket:', this.playerId);
         }
         
         // Store other players as simple objects for rendering
@@ -1615,7 +1803,7 @@ detectMobileDevice() {
         
         // Join the session using exact approach from working demo
         if (window.socketManager.currentSessionId) {
-            console.log('🎯 Joining session for sync:', window.socketManager.currentSessionId);
+            debugLog('🎯 Joining session for sync:', window.socketManager.currentSessionId);
             window.socketManager.socket.emit('join-simple-session', window.socketManager.currentSessionId);
         }
         
@@ -1631,7 +1819,7 @@ detectMobileDevice() {
                 weaponPoints: this.ship.weaponPoints || []
             };
             
-            console.log('🚢 Broadcasting ship design data...', shipData);
+            debugLog('🚢 Broadcasting ship design data...', shipData);
             window.socketManager.socket.emit('player-ship-data', {
                 shipData: shipData
             });
@@ -1639,7 +1827,7 @@ detectMobileDevice() {
         
         // Listen for ship design data from other players
         window.socketManager.socket.on('player-ship-data', (data) => {
-            console.log('🚢 Received ship data from player:', data.playerId, data.shipData);
+            debugLog('🚢 Received ship data from player:', data.playerId, data.shipData);
             this.handlePlayerShipData(data);
         });
         
@@ -1649,16 +1837,15 @@ detectMobileDevice() {
             if (!data.playerId && data.senderId) {
                 data.playerId = data.senderId;
             }
-            
+
             if (data.playerId && data.playerId !== this.playerId) {
-                console.log('📍 Received position update from:', data.playerId, 'at', data.x, data.y);
                 this.handleVerySimplePlayerUpdate(data);
             }
         });
         
         // Handle request for ship data from new players
         window.socketManager.socket.on('request-ship-data', (data) => {
-            console.log('🔄 Server requesting ship data for new player:', data.newPlayerId);
+            debugLog('🔄 Server requesting ship data for new player:', data.newPlayerId);
             if (this.ship) {
                 // Build ship data from the ship's properties
                 const shipData = {
@@ -1678,7 +1865,7 @@ detectMobileDevice() {
         
         // Listen for shooting actions from other players (deterministic approach)
         window.socketManager.socket.on('player-shoot', (data) => {
-            console.log('💥 RECEIVED player-shoot event:', {
+            debugLog('💥 RECEIVED player-shoot event:', {
                 fromPlayer: data.playerId,
                 myPlayer: this.playerId,
                 shouldProcess: data.playerId && data.playerId !== this.playerId,
@@ -1686,7 +1873,7 @@ detectMobileDevice() {
             });
             
             if (data.playerId && data.playerId !== this.playerId) {
-                console.log('💥 Processing shot from player:', data.playerId);
+                debugLog('💥 Processing shot from player:', data.playerId);
                 
                 // Recreate the exact same bullets the other player created
                 const BulletClass = window.Bullet || Bullet;
@@ -1735,9 +1922,18 @@ detectMobileDevice() {
                 }
                 
                 // Add all bullets to the game
-                console.log('💥 Adding', bullets.length, 'bullets to game');
+                debugLog('💥 Adding', bullets.length, 'bullets to game');
                 this.bullets = this.bullets.concat(bullets);
-                console.log('💥 Total bullets now:', this.bullets.length);
+                debugLog('💥 Total bullets now:', this.bullets.length);
+
+                // Check for enemy aggro when other player shoots
+                for (const enemy of this.enemies) {
+                    if (enemy.active && enemy.checkBulletAggro) {
+                        for (const bullet of bullets) {
+                            enemy.checkBulletAggro(bullet.x, bullet.y, data.playerId);
+                        }
+                    }
+                }
             }
         });
         
@@ -1762,7 +1958,7 @@ detectMobileDevice() {
             }
         }, 50); // 20 FPS like test-two-ships
         
-        console.log('✅ Working ship sync setup complete');
+        debugLog('✅ Working ship sync setup complete');
     }
     
     handleVerySimplePlayerUpdate(data) {
@@ -1783,10 +1979,9 @@ detectMobileDevice() {
             shipData: this.otherPlayers[data.playerId]?.shipData || null,
             visible: data.visible !== undefined ? data.visible : true  // Use the visibility state from the update
         };
-        
-        // Log only on first creation
+
+        // Track player without logging
         if (!this.otherPlayers[data.playerId]?.logged) {
-            console.log('➕ Tracking player:', data.playerId);
             this.otherPlayers[data.playerId].logged = true;
         }
     }
@@ -1798,11 +1993,11 @@ detectMobileDevice() {
             return;
         }
 
-        console.log('🔧 Setting up SIMPLE game sync events...');
+        debugLog('🔧 Setting up SIMPLE game sync events...');
 
         // Use simple session join like minimal test
         if (this.sessionId) {
-            console.log('🎯 Joining simple session:', this.sessionId);
+            debugLog('🎯 Joining simple session:', this.sessionId);
             window.socketManager.socket.emit('join-simple-session', this.sessionId);
         }
 
@@ -1818,14 +2013,14 @@ detectMobileDevice() {
 
         // Handle session joined confirmation
         window.socketManager.socket.on('session-joined', (data) => {
-            console.log('✅ Simple session joined:', data);
+            debugLog('✅ Simple session joined:', data);
         });
 
-        console.log('✅ Simple game sync events registered');
+        debugLog('✅ Simple game sync events registered');
     }
 
     setupSimpleSyncTimers() {
-        console.log('🔧 Setting up SIMPLE sync timers...');
+        debugLog('🔧 Setting up SIMPLE sync timers...');
 
         // Send player (ship) updates every 50ms like minimal test
         this.playerSyncTimer = setInterval(() => {
@@ -1849,12 +2044,12 @@ detectMobileDevice() {
         //     }
         // }, 100);
 
-        console.log('✅ Simple sync timers started');
+        debugLog('✅ Simple sync timers started');
         
         // Send an immediate test message to verify connection
         setTimeout(() => {
             if (this.ship && window.socketManager && window.socketManager.socket && window.socketManager.socket.connected) {
-                console.log('🧪 Sending test player update to verify connection...');
+                debugLog('🧪 Sending test player update to verify connection...');
                 const testData = {
                     playerId: this.playerId,
                     x: this.ship.x,
@@ -1866,7 +2061,7 @@ detectMobileDevice() {
                     playerName: 'TestPlayer'
                 };
                 window.socketManager.socket.emit('player-update', testData);
-                console.log('🧪 Test update sent with data:', testData);
+                debugLog('🧪 Test update sent with data:', testData);
             } else {
                 console.error('🧪 Cannot send test update - connection not ready');
             }
@@ -1891,7 +2086,7 @@ detectMobileDevice() {
         if (!this.broadcastCount) this.broadcastCount = 0;
         this.broadcastCount++;
         if (this.broadcastCount <= 5 || this.broadcastCount % 60 === 0) { // Log first 5 and every 3 seconds at 20fps
-            console.log('📡 Broadcasting player data:', {
+            debugLog('📡 Broadcasting player data:', {
                 playerId: this.playerId,
                 position: `(${Math.round(this.ship.x)}, ${Math.round(this.ship.y)})`,
                 thrusting: this.ship.thrusting
@@ -1930,7 +2125,7 @@ detectMobileDevice() {
     }
 
     handleSimplePlayerUpdate(data) {
-        console.log('🎮 Received simple player update:', {
+        debugLog('🎮 Received simple player update:', {
             playerId: data.playerId,
             position: `(${Math.round(data.x)}, ${Math.round(data.y)})`,
             angle: Math.round(data.angle * 180 / Math.PI),
@@ -1940,7 +2135,7 @@ detectMobileDevice() {
 
         // Don't update our own ship
         if (data.playerId === this.playerId) {
-            console.log('🎮 Ignoring own player update');
+            debugLog('🎮 Ignoring own player update');
             return;
         }
 
@@ -1951,7 +2146,7 @@ detectMobileDevice() {
             otherShip.playerName = data.playerName;
             otherShip.isOtherPlayer = true;
             this.players.set(data.playerId, otherShip);
-            console.log('✅ Created new player ship:', data.playerId, 'at', `(${Math.round(data.x)}, ${Math.round(data.y)})`);
+            debugLog('✅ Created new player ship:', data.playerId, 'at', `(${Math.round(data.x)}, ${Math.round(data.y)})`);
         }
 
         const otherShip = this.players.get(data.playerId);
@@ -1966,7 +2161,7 @@ detectMobileDevice() {
     }
 
     handleGameObjectsUpdate(data) {
-        console.log('🌍 Received game objects update from:', data.senderId);
+        debugLog('🌍 Received game objects update from:', data.senderId);
 
         // Update asteroids
         this.syncSimpleAsteroids(data.asteroids);
@@ -2006,8 +2201,8 @@ detectMobileDevice() {
     }
 
     setupSyncTimers() {
-        console.log('Setting up sync timers...');
-        console.log('Sync interval:', this.syncInterval, 'ms');
+        debugLog('Setting up sync timers...');
+        debugLog('Sync interval:', this.syncInterval, 'ms');
         
         // Send player state updates at 20 FPS
         this.syncTimer = setInterval(() => {
@@ -2015,7 +2210,7 @@ detectMobileDevice() {
                 if (this.ship && window.socketManager && window.socketManager.isConnected && window.socketManager.currentSessionId) {
                     this.broadcastPlayerState();
                 } else {
-                    console.log('Skipping player broadcast:', {
+                    debugLog('Skipping player broadcast:', {
                         hasShip: !!this.ship,
                         hasSocketManager: !!window.socketManager,
                         isConnected: window.socketManager?.isConnected,
@@ -2030,7 +2225,7 @@ detectMobileDevice() {
         // Send game state updates (host only) at 10 FPS  
         this.gameStateTimer = setInterval(() => {
             try {
-                console.log('🔄 TIMER: Game state timer tick - Host check:', {
+                debugLog('🔄 TIMER: Game state timer tick - Host check:', {
                     isHost: this.isHost,
                     hasSocketManager: !!window.socketManager,
                     isConnected: window.socketManager?.isConnected,
@@ -2044,7 +2239,7 @@ detectMobileDevice() {
                     this.hostBroadcastCount++;
                     
                     if (this.hostBroadcastCount % 100 === 0) { // Every 10 seconds
-                        console.log('🌍 TIMER: HOST broadcasting game state...', {
+                        debugLog('🌍 TIMER: HOST broadcasting game state...', {
                             broadcastCount: this.hostBroadcastCount,
                             asteroids: this.asteroids.length,
                             enemies: this.enemies.length,
@@ -2053,7 +2248,7 @@ detectMobileDevice() {
                     }
                     this.broadcastGameState();
                 } else if (this.isHost) {
-                    console.log('🌍 TIMER: Host skipping game state broadcast:', {
+                    debugLog('🌍 TIMER: Host skipping game state broadcast:', {
                         hasSocketManager: !!window.socketManager,
                         isConnected: window.socketManager?.isConnected,
                         hasSession: !!window.socketManager?.currentSessionId
@@ -2063,7 +2258,7 @@ detectMobileDevice() {
                     this.clientReceiveCheck++;
                     
                     if (this.clientReceiveCheck % 100 === 0) { // Every 10 seconds
-                        console.log('🔔 TIMER: Non-host client heartbeat - waiting for host broadcasts...', {
+                        debugLog('🔔 TIMER: Non-host client heartbeat - waiting for host broadcasts...', {
                             checkCount: this.clientReceiveCheck,
                             lastSyncNumber: this.syncCounter || 0,
                             timeSinceLastSync: this.lastSyncTime ? (Date.now() - this.lastSyncTime) + 'ms' : 'never'
@@ -2075,42 +2270,42 @@ detectMobileDevice() {
             }
         }, this.syncInterval * 2);
         
-        console.log('Sync timers set up successfully');
+        debugLog('Sync timers set up successfully');
     }
 
     cleanupMultiplayerSync() {
-        console.log('🧹 CLEANUP: Cleaning up multiplayer sync systems...');
+        debugLog('🧹 CLEANUP: Cleaning up multiplayer sync systems...');
         
         // Clear existing timers
         if (this.syncTimer) {
             clearInterval(this.syncTimer);
             this.syncTimer = null;
-            console.log('🧹 CLEANUP: Cleared sync timer');
+            debugLog('🧹 CLEANUP: Cleared sync timer');
         }
         
         if (this.gameStateTimer) {
             clearInterval(this.gameStateTimer);
             this.gameStateTimer = null;
-            console.log('🧹 CLEANUP: Cleared game state timer');
+            debugLog('🧹 CLEANUP: Cleared game state timer');
         }
 
         // Clear simple timers
         if (this.playerSyncTimer) {
             clearInterval(this.playerSyncTimer);
             this.playerSyncTimer = null;
-            console.log('🧹 CLEANUP: Cleared player sync timer');
+            debugLog('🧹 CLEANUP: Cleared player sync timer');
         }
         
         if (this.simpleUpdateTimer) {
             clearInterval(this.simpleUpdateTimer);
             this.simpleUpdateTimer = null;
-            console.log('🧹 CLEANUP: Cleared simple update timer');
+            debugLog('🧹 CLEANUP: Cleared simple update timer');
         }
 
         if (this.gameObjectsSyncTimer) {
             clearInterval(this.gameObjectsSyncTimer);
             this.gameObjectsSyncTimer = null;
-            console.log('🧹 CLEANUP: Cleared game objects sync timer');
+            debugLog('🧹 CLEANUP: Cleared game objects sync timer');
         }
         
         // Reset counters
@@ -2119,11 +2314,11 @@ detectMobileDevice() {
         this.hostBroadcastCount = 0;
         this.clientReceiveCheck = 0;
         
-        console.log('🧹 CLEANUP: Multiplayer sync cleanup completed');
+        debugLog('🧹 CLEANUP: Multiplayer sync cleanup completed');
     }
 
     setupGameSyncEvents() {
-        console.log('Setting up game sync events, hasSocketManager:', !!window.socketManager);
+        debugLog('Setting up game sync events, hasSocketManager:', !!window.socketManager);
         
         if (!window.socketManager) {
             console.error('Cannot setup game sync events - no socket manager');
@@ -2131,13 +2326,13 @@ detectMobileDevice() {
         }
 
         // Only register handlers if they don't exist yet (prevent duplicates but don't clean up working handlers)
-        console.log('Checking existing socket event handlers...');
+        debugLog('Checking existing socket event handlers...');
         if (this.handlersRegistered) {
-            console.log('Handlers already registered, skipping setup');
+            debugLog('Handlers already registered, skipping setup');
             return;
         }
 
-        console.log('Registering new socket event handlers...');
+        debugLog('Registering new socket event handlers...');
 
         // Store handler references for cleanup
         this.playerStateHandler = (data) => {
@@ -2146,9 +2341,9 @@ detectMobileDevice() {
         window.socketManager.on('player-update', this.playerStateHandler);
 
         // Handle game state updates from host
-        console.log('🔧 EVENT: Registering game-objects-update handler');
+        debugLog('🔧 EVENT: Registering game-objects-update handler');
         this.gameStateHandler = (data) => {
-            console.log('🚨 CLIENT: ⭐ RECEIVED GAME-STATE-UPDATE EVENT! ⭐', {
+            debugLog('🚨 CLIENT: ⭐ RECEIVED GAME-STATE-UPDATE EVENT! ⭐', {
                 hasData: !!data,
                 sessionId: data?.sessionId,
                 mySessionId: this.sessionId,
@@ -2202,7 +2397,7 @@ detectMobileDevice() {
 
         // Handle multiplayer game start
         window.socketManager.on('game-started', (data) => {
-            console.log('🎮 GAME: ⭐ MULTIPLAYER GAME STARTED! ⭐', data);
+            debugLog('🎮 GAME: ⭐ MULTIPLAYER GAME STARTED! ⭐', data);
             this.handleGameStarted(data);
         });
         
@@ -2215,12 +2410,7 @@ detectMobileDevice() {
         window.socketManager.socket.on('enemies-update', (data) => {
             this.handleEnemiesUpdate(data);
         });
-        
-        // Handle enemy shooting
-        window.socketManager.socket.on('enemy-shoot', (data) => {
-            this.handleEnemyShoot(data.enemyId);
-        });
-        
+
         // Handle mathematical objects spawn
         window.socketManager.socket.on('math-objects-spawn', (data) => {
             this.handleMathObjectsSpawn(data);
@@ -2230,50 +2420,126 @@ detectMobileDevice() {
         window.socketManager.socket.on('math-objects-destroyed', (data) => {
             this.handleMathObjectDestroyed(data);
         });
-        
+
         // Handle ship collision events from other clients
         window.socketManager.socket.on('ship-collision', (data) => {
             this.handleShipCollision(data);
         });
-        
+
+        // Handle round transitions (multiplayer round progression)
+        window.socketManager.socket.on('round-transition', (data) => {
+            this.handleRoundTransition(data);
+        });
+
+        // Handle multiplayer game completion (all rounds finished)
+        window.socketManager.socket.on('multiplayer-game-complete', (data) => {
+            this.handleMultiplayerGameComplete(data);
+        });
+
+        // Handle CPU enemy spawn (multiplayer)
+        window.socketManager.socket.on('enemy-spawn', (data) => {
+            this.handleEnemySpawn(data);
+        });
+
+        // Handle CPU enemy state updates (multiplayer)
+        window.socketManager.socket.on('enemy-state-update', (data) => {
+            this.handleEnemyStateUpdate(data);
+        });
+
+        // Handle CPU enemy shooting (multiplayer)
+        window.socketManager.socket.on('enemy-shoot', (data) => {
+            this.handleEnemyShoot(data);
+        });
+
+        // Handle CPU enemy destroyed (multiplayer)
+        window.socketManager.socket.on('enemy-destroyed', (data) => {
+            this.handleEnemyDestroyed(data);
+        });
+
+        // Handle ship explosion from other players (multiplayer)
+        window.socketManager.socket.on('ship-explosion', (data) => {
+            this.handleShipExplosion(data);
+        });
+
         // Mark handlers as registered
         this.handlersRegistered = true;
-        console.log('Game sync events registered successfully');
+        debugLog('Game sync events registered successfully');
     }
 
     handleGameStarted(data) {
-        console.log('🎮 GAME: *** GAME STARTED EVENT TRIGGERED ***', data);
-        
+        debugLog('🎮 GAME: *** GAME STARTED EVENT TRIGGERED ***', data);
+
+        // Guard against multiple calls - only process once per game session
+        if (this._gameStartedHandled) {
+            debugLog('🎮 GAME: handleGameStarted already processed, skipping duplicate call');
+            return;
+        }
+        this._gameStartedHandled = true;
+
         // Ensure game is in multiplayer mode
         if (!this.isMultiplayer()) {
-            console.log('🎮 GAME: Setting up multiplayer mode for game start...');
-            this.gameMode = 'multiplayer';
+            debugLog('🎮 GAME: Setting up multiplayer mode for game start...');
+            this.mode = 'multiplayer';
         }
-        
-        console.log('🎮 GAME: Player status:', {
+
+        debugLog('🎮 GAME: Player status:', {
             isHost: this.isHost,
             playerId: this.playerId,
             sessionId: this.sessionId,
             shipPosition: { x: this.ship?.x, y: this.ship?.y }
         });
-        
+
         // Clear any game objects to start fresh
         this.asteroids = [];
         this.enemies = [];
         this.otherEnemies = {}; // Store enemy states from host
-        
-        // Single spawn trigger with proper timing (simplified approach)
-        console.log('🎮 *** SCHEDULING ASTEROID SPAWN IN 2 SECONDS ***');
-        setTimeout(() => {
-            console.log('🎮 *** SPAWN TIMEOUT TRIGGERED ***');
-            this.forceSpawnTestObjects();
-        }, 2000); // Give time for session setup to complete
-        
-        // Start the game loop if not already running
-        if (!this.isRunning) {
-            console.log('🎮 GAME: Starting game loop after multiplayer game start...');
-            this.gameLoop();
+
+        // Update UI to show Round 1
+        // Update levelNumber span (just the number, "Round" is in parent element)
+        if (this.levelNumber) {
+            this.levelNumber.textContent = this.multiplayerRound;
         }
+
+        // Schedule initial spawn with delay for client sync
+        // Guard against duplicate spawn scheduling
+        if (this._initialSpawnScheduled) {
+            debugLog('🎮 GAME: Initial spawn already scheduled, skipping');
+            return;
+        }
+        this._initialSpawnScheduled = true;
+
+        setTimeout(() => {
+            // Double-check we haven't already spawned (in case forceSpawnTestObjects ran)
+            if (this.asteroids.length > 0 && this.asteroids.some(a => a.isMathematical)) {
+                debugLog('🎮 GAME: Asteroids already exist, skipping spawn but setting multiplayerRoundStarted');
+                this.multiplayerRoundStarted = true;
+                return;
+            }
+
+            // Host spawns initial asteroids FIRST
+            if (this.isHost) {
+                this.spawnMultiplayerRoundAsteroids(this.multiplayerRound);
+
+                // Broadcast Round 1 announcement to clients
+                if (window.socketManager?.socket?.connected) {
+                    window.socketManager.socket.emit('round-transition', {
+                        round: this.multiplayerRound,
+                        timestamp: Date.now(),
+                        isInitial: true
+                    });
+                }
+            }
+
+            // THEN mark round as started (after asteroids are spawned)
+            this.multiplayerRoundStarted = true;
+            debugLog('🎮 GAME: multiplayerRoundStarted set to TRUE');
+
+            // Show round message (updates innerHTML and displays)
+            this.showLevelMessage();
+        }, 2000); // Give time for session setup to complete
+
+        // Note: Game loop should already be running from init()
+        // Do NOT call gameLoop() directly here - it causes NaN timestamp issues
     }
 
     broadcastPlayerState() {
@@ -2284,7 +2550,7 @@ detectMobileDevice() {
 
         // Additional safety checks for ship properties
         if (typeof this.ship.x !== 'number' || typeof this.ship.y !== 'number') {
-            console.log('🎮 BROADCAST: Ship has invalid position:', {
+            debugLog('🎮 BROADCAST: Ship has invalid position:', {
                 x: this.ship.x,
                 y: this.ship.y,
                 ship: this.ship
@@ -2322,7 +2588,7 @@ detectMobileDevice() {
         
         // Log first few broadcasts to see ship design data
         if (this.broadcastCount <= 3 || this.broadcastCount % 100 === 1) {
-            console.log('🎮 BROADCAST: Broadcasting player state:', this.playerId, 'at', this.ship.x, this.ship.y, 'session:', this.sessionId, 'ship design:', {
+            debugLog('🎮 BROADCAST: Broadcasting player state:', this.playerId, 'at', this.ship.x, this.ship.y, 'session:', this.sessionId, 'ship design:', {
                 customLines: this.ship.customLines?.length || 0,
                 shipColor: this.ship.shipColor,
                 thrusterColor: this.ship.thrusterColor,
@@ -2336,7 +2602,7 @@ detectMobileDevice() {
     }
 
     broadcastGameState() {
-        console.log('🌍 BROADCAST: broadcastGameState() called - initial checks:', {
+        debugLog('🌍 BROADCAST: broadcastGameState() called - initial checks:', {
             isHost: this.isHost,
             hasSocketManager: !!window.socketManager,
             hasSessionId: !!this.sessionId,
@@ -2349,7 +2615,7 @@ detectMobileDevice() {
         });
         
         if (!this.isHost || !window.socketManager || !this.sessionId || !window.socketManager.isConnected || !window.socketManager.currentSessionId) {
-            console.log('🌍 BROADCAST: Skipping game state broadcast:', {
+            debugLog('🌍 BROADCAST: Skipping game state broadcast:', {
                 isHost: this.isHost,
                 hasSocketManager: !!window.socketManager,
                 hasSessionId: !!this.sessionId,
@@ -2366,7 +2632,7 @@ detectMobileDevice() {
         const invalidBullets = this.bullets.filter(bullet => !bullet || typeof bullet.x !== 'number').length;
         
         if (invalidAsteroids > 0 || invalidEnemies > 0 || invalidBullets > 0) {
-            console.log('🌍 BROADCAST: Found invalid objects before filtering:', {
+            debugLog('🌍 BROADCAST: Found invalid objects before filtering:', {
                 invalidAsteroids,
                 invalidEnemies,
                 invalidBullets,
@@ -2407,7 +2673,7 @@ detectMobileDevice() {
             timestamp: Date.now()
         };
 
-        console.log('🌍 BROADCAST: HOST broadcasting game state to session', this.sessionId, ':', {
+        debugLog('🌍 BROADCAST: HOST broadcasting game state to session', this.sessionId, ':', {
             asteroids: this.asteroids.length,
             enemies: this.enemies.length,
             bullets: this.bullets.length,
@@ -2420,36 +2686,27 @@ detectMobileDevice() {
     }
 
     handlePlayerStateUpdate(data) {
-        console.log('🎮 GAME: Received player state update from:', data.playerId, 'comparing with own playerId:', this.playerId, 'match:', data.playerId === this.playerId);
-        
+        // Silently ignore own updates
         if (data.playerId === this.playerId) {
-            console.log('🎮 GAME: Ignoring own player update (correct behavior)');
-            return; // Don't update own player
+            return;
         }
-
-        console.log('🎮 GAME: Processing player state update from:', data.playerId, 'at', data.ship?.x, data.ship?.y);
-        console.log('🎮 GAME: Current players map size:', this.players.size);
-        console.log('🎮 GAME: Current session:', this.sessionId, 'own player:', this.playerId, 'is host:', this.isHost);
 
         // Update or create other player's ship
         let otherPlayer = this.players.get(data.playerId);
-        
+
         if (!otherPlayer) {
             // Create new player ship
-            console.log('🎮 GAME: Creating new player ship for:', data.playerId);
             otherPlayer = this.createOtherPlayerShip(data);
             this.players.set(data.playerId, otherPlayer);
-            console.log(`🎮 GAME: Added new player: ${data.playerId}, total players: ${this.players.size}`);
         } else {
             // Update existing player
-            console.log('🎮 GAME: Updating existing player:', data.playerId);
             this.updateOtherPlayerShip(otherPlayer, data);
         }
     }
 
     handleGameStateUpdate(data) {
         if (this.isHost) {
-            console.log('🌍 GAME: Host ignoring game state update (as expected)');
+            debugLog('🌍 GAME: Host ignoring game state update (as expected)');
             return; // Host doesn't receive game state updates
         }
 
@@ -2461,7 +2718,7 @@ detectMobileDevice() {
         const timeSinceLastSync = Date.now() - this.lastSyncTime;
         this.lastSyncTime = Date.now();
         
-        console.log('🌍 GAME: ⭐ NON-HOST CLIENT RECEIVED GAME STATE UPDATE! ⭐', {
+        debugLog('🌍 GAME: ⭐ NON-HOST CLIENT RECEIVED GAME STATE UPDATE! ⭐', {
             syncNumber: this.syncCounter,
             timeSinceLastSync: timeSinceLastSync + 'ms',
             asteroids: data.asteroids?.length || 0,
@@ -2488,25 +2745,25 @@ detectMobileDevice() {
 
         try {
             // Update game variables
-            console.log('🌍 GAME: Updating game state variables...');
+            debugLog('🌍 GAME: Updating game state variables...');
             this.level = data.level;
             this.score = data.score;
             this.lives = data.lives;
 
             // Update asteroids (replace with authoritative state)
-            console.log('🌍 GAME: Syncing asteroids...');
+            debugLog('🌍 GAME: Syncing asteroids...');
             this.syncAsteroids(data.asteroids);
             
             // Update enemies
-            console.log('🌍 GAME: Syncing enemies...');
+            debugLog('🌍 GAME: Syncing enemies...');
             this.syncEnemies(data.enemies);
             
             // Update bullets
-            console.log('🌍 GAME: Syncing bullets...');
+            debugLog('🌍 GAME: Syncing bullets...');
             this.syncBullets(data.bullets);
 
             // Update UI
-            console.log('🌍 GAME: Updating UI...');
+            debugLog('🌍 GAME: Updating UI...');
             this.updateUI();
             
         } catch (error) {
@@ -2525,7 +2782,7 @@ detectMobileDevice() {
             // Continue with partial sync if possible
         }
         
-        console.log('🌍 GAME: Game state sync complete. New counts:', {
+        debugLog('🌍 GAME: Game state sync complete. New counts:', {
             asteroids: this.asteroids.length,
             enemies: this.enemies.length,
             bullets: this.bullets.length
@@ -2533,7 +2790,7 @@ detectMobileDevice() {
     }
 
     createOtherPlayerShip(data) {
-        console.log('🚀 SHIP: Creating other player ship:', {
+        debugLog('🚀 SHIP: Creating other player ship:', {
             playerId: data.playerId,
             playerName: data.playerName,
             position: data.position,
@@ -2570,7 +2827,7 @@ detectMobileDevice() {
         otherShip.isOtherPlayer = true; // Flag to prevent input handling
         otherShip.alive = data.alive !== false; // Default to true
         
-        console.log('🚀 SHIP: Other player ship created successfully for:', data.playerId, 'with rotation:', otherShip.rotation);
+        debugLog('🚀 SHIP: Other player ship created successfully for:', data.playerId, 'with rotation:', otherShip.rotation);
         return otherShip;
     }
 
@@ -2587,7 +2844,7 @@ detectMobileDevice() {
         }
         
         if (!data.ship) {
-            console.error('🚀 UPDATE ERROR: data.ship is null/undefined');
+            // Silently ignore - ship may be exploding or respawning
             return;
         }
 
@@ -2654,7 +2911,7 @@ detectMobileDevice() {
                 ship.playerName = data.ship.playerName;
             }
             
-            console.log('🚀 UPDATE: Updated player ship:', data.playerId, 'position:', ship.x, ship.y, 'rotation:', ship.rotation, 'design updated:', designUpdated, 'ship design:', {
+            debugLog('🚀 UPDATE: Updated player ship:', data.playerId, 'position:', ship.x, ship.y, 'rotation:', ship.rotation, 'design updated:', designUpdated, 'ship design:', {
                 customLines: ship.customLines?.length || 0,
                 shipColor: ship.shipColor,
                 thrusterColor: ship.thrusterColor,
@@ -2669,7 +2926,7 @@ detectMobileDevice() {
     }
 
     syncAsteroids(asteroidData) {
-        console.log('🪨 SYNC: ⭐ SYNC ASTEROIDS CALLED! ⭐', {
+        debugLog('🪨 SYNC: ⭐ SYNC ASTEROIDS CALLED! ⭐', {
             dataType: typeof asteroidData,
             isArray: Array.isArray(asteroidData),
             dataLength: asteroidData?.length || 0,
@@ -2683,8 +2940,8 @@ detectMobileDevice() {
             return;
         }
         
-        console.log('🪨 SYNC: Raw asteroid data:', asteroidData.slice(0, 2)); // Show first 2 asteroids
-        console.log('🪨 SYNC: Current asteroids before sync:', this.asteroids.length);
+        debugLog('🪨 SYNC: Raw asteroid data:', asteroidData.slice(0, 2)); // Show first 2 asteroids
+        debugLog('🪨 SYNC: Current asteroids before sync:', this.asteroids.length);
         
         try {
             // Simple replacement strategy - in production, could be more sophisticated
@@ -2694,7 +2951,7 @@ detectMobileDevice() {
                     return null;
                 }
                 
-                console.log(`🪨 SYNC: Creating asteroid ${index + 1}/${asteroidData.length} at (${data.x}, ${data.y}), size: ${data.size}`);
+                debugLog(`🪨 SYNC: Creating asteroid ${index + 1}/${asteroidData.length} at (${data.x}, ${data.y}), size: ${data.size}`);
                 
                 // Validate required properties
                 const x = typeof data.x === 'number' ? data.x : 0;
@@ -2722,7 +2979,7 @@ detectMobileDevice() {
                 return asteroid;
             }).filter(asteroid => asteroid !== null); // Remove any null entries
             
-            console.log('🪨 SYNC: Asteroids sync complete. New count:', this.asteroids.length);
+            debugLog('🪨 SYNC: Asteroids sync complete. New count:', this.asteroids.length);
             
         } catch (error) {
             console.error('🪨 SYNC ERROR: Exception in syncAsteroids:', error);
@@ -2737,8 +2994,8 @@ detectMobileDevice() {
             return;
         }
         
-        console.log('👾 SYNC: syncEnemies called with', enemyData.length, 'enemies');
-        console.log('👾 SYNC: Current enemies before sync:', this.enemies.length);
+        debugLog('👾 SYNC: syncEnemies called with', enemyData.length, 'enemies');
+        debugLog('👾 SYNC: Current enemies before sync:', this.enemies.length);
         
         try {
             this.enemies = enemyData.map((data, index) => {
@@ -2747,7 +3004,7 @@ detectMobileDevice() {
                     return null;
                 }
                 
-                console.log(`👾 SYNC: Creating enemy ${index + 1}/${enemyData.length} at (${data.x}, ${data.y}), type: ${data.type}`);
+                debugLog(`👾 SYNC: Creating enemy ${index + 1}/${enemyData.length} at (${data.x}, ${data.y}), type: ${data.type}`);
                 
                 // Validate required properties
                 const x = typeof data.x === 'number' ? data.x : 0;
@@ -2776,7 +3033,7 @@ detectMobileDevice() {
                 return enemy;
             }).filter(enemy => enemy !== null); // Remove any null entries
             
-            console.log('👾 SYNC: Enemies sync complete. New count:', this.enemies.length);
+            debugLog('👾 SYNC: Enemies sync complete. New count:', this.enemies.length);
             
         } catch (error) {
             console.error('👾 SYNC ERROR: Exception in syncEnemies:', error);
@@ -2786,33 +3043,33 @@ detectMobileDevice() {
     }
 
     syncBullets(bulletData) {
-        console.log('💥 SYNC: syncBullets called with', bulletData.length, 'bullets');
-        console.log('💥 SYNC: Current bullets before sync:', this.bullets.length);
+        debugLog('💥 SYNC: syncBullets called with', bulletData.length, 'bullets');
+        debugLog('💥 SYNC: Current bullets before sync:', this.bullets.length);
         
         this.bullets = bulletData.map((data, index) => {
-            console.log(`💥 SYNC: Creating bullet ${index + 1}/${bulletData.length} at (${data.x}, ${data.y}), player: ${data.playerId}`);
+            debugLog(`💥 SYNC: Creating bullet ${index + 1}/${bulletData.length} at (${data.x}, ${data.y}), player: ${data.playerId}`);
             const bullet = new Bullet(data.x, data.y, data.velocity.x, data.velocity.y, this, data.playerId);
             bullet.id = data.id;
             return bullet;
         });
         
-        console.log('💥 SYNC: Bullets sync complete. New count:', this.bullets.length);
+        debugLog('💥 SYNC: Bullets sync complete. New count:', this.bullets.length);
     }
 
     handlePlayerJoined(data) {
-        console.log(`Player ${data.playerId} joined the game`);
+        debugLog(`Player ${data.playerId} joined the game`);
         // Player will be added when their first state update arrives
     }
 
     handlePlayerDisconnected(data) {
-        console.log(`Player ${data.playerId} disconnected`);
+        debugLog(`Player ${data.playerId} disconnected`);
         this.players.delete(data.playerId);
     }
 
     handleLivesUpdate(data) {
         if (data.sessionId !== this.sessionId) return;
         
-        console.log(`Received lives update: ${data.lives} remaining`);
+        debugLog(`Received lives update: ${data.lives} remaining`);
         this.lives = data.lives;
         this.updateUI();
     }
@@ -2820,14 +3077,14 @@ detectMobileDevice() {
     handleGameOver(data) {
         if (data.sessionId !== this.sessionId) return;
         
-        console.log(`Game over received: ${data.reason}`);
+        debugLog(`Game over received: ${data.reason}`);
         this.endGame();
     }
 
     handleLevelComplete(data) {
         if (data.sessionId !== this.sessionId) return;
         
-        console.log(`Level complete received: advancing to level ${data.newLevel}`);
+        debugLog(`Level complete received: advancing to level ${data.newLevel}`);
         this.level = data.newLevel;
         this.score = data.score;
         
@@ -2842,7 +3099,7 @@ detectMobileDevice() {
 
     // Set multiplayer session info
     setMultiplayerSession(sessionId, playerId, isHost = false) {
-        console.log('🔧 DEBUG: setMultiplayerSession called with parameters:', {
+        debugLog('🔧 DEBUG: setMultiplayerSession called with parameters:', {
             sessionId,
             playerId,
             isHost,
@@ -2850,10 +3107,10 @@ detectMobileDevice() {
         });
         
         // Spawn triggering is now handled by handleGameStarted for better timing
-        console.log('🎮 Multiplayer session configured - spawn will be triggered by game start event');
+        debugLog('🎮 Multiplayer session configured - spawn will be triggered by game start event');
         
         // Log previous state
-        console.log('🔧 DEBUG: Previous multiplayer state:', {
+        debugLog('🔧 DEBUG: Previous multiplayer state:', {
             previousSessionId: this.sessionId,
             previousPlayerId: this.playerId,
             previousIsHost: this.isHost,
@@ -2866,7 +3123,7 @@ detectMobileDevice() {
         this.playerId = playerId;
         this.isHost = isHost;
         
-        console.log('🚨 GAME: HOST STATUS FINAL ASSIGNMENT 🚨', {
+        debugLog('🚨 GAME: HOST STATUS FINAL ASSIGNMENT 🚨', {
             sessionId: sessionId,
             playerId: playerId,
             isHost: isHost,
@@ -2885,18 +3142,18 @@ detectMobileDevice() {
         }
         
         // CRITICAL: Set up event handlers immediately when session is established
-        console.log('🔧 CRITICAL: Setting up socket handlers immediately after session established');
+        debugLog('🔧 CRITICAL: Setting up socket handlers immediately after session established');
         this.setupGameSyncEvents();
         
         if (this.ship) {
-            console.log('🔧 DEBUG: Setting ship.playerId from', this.ship.playerId, 'to', playerId);
+            debugLog('🔧 DEBUG: Setting ship.playerId from', this.ship.playerId, 'to', playerId);
             this.ship.playerId = playerId;
         } else {
-            console.log('🔧 DEBUG: No ship instance available to set playerId on');
+            debugLog('🔧 DEBUG: No ship instance available to set playerId on');
         }
         
         // Log final state
-        console.log('🔧 DEBUG: Final multiplayer state after setting:', {
+        debugLog('🔧 DEBUG: Final multiplayer state after setting:', {
             sessionId: this.sessionId,
             playerId: this.playerId,
             isHost: this.isHost,
@@ -2907,11 +3164,11 @@ detectMobileDevice() {
             cameraEnabled: this.camera.enabled
         });
         
-        console.log(`Multiplayer session set: ${sessionId}, player: ${playerId}, host: ${isHost}`);
+        debugLog(`Multiplayer session set: ${sessionId}, player: ${playerId}, host: ${isHost}`);
         
         // Broadcast ship data to other players if we have a ship
         if (this.ship && window.socketManager) {
-            console.log('🚢 GAME: Broadcasting ship data after session setup');
+            debugLog('🚢 GAME: Broadcasting ship data after session setup');
             // Add a small delay to ensure socket is properly joined to session
             setTimeout(() => {
                 this.broadcastShipData();
@@ -2938,8 +3195,8 @@ detectMobileDevice() {
     }
     // Handle ship design data from other players (from working demo)
     handlePlayerShipData(data) {
-        console.log('🚢 Received ship data from player:', data.playerId, data.shipData);
-        console.log('🚢 Ship data details:', {
+        debugLog('🚢 Received ship data from player:', data.playerId, data.shipData);
+        debugLog('🚢 Ship data details:', {
             name: data.shipData?.name,
             customLinesCount: data.shipData?.customLines?.length || 0,
             color: data.shipData?.color
@@ -2952,7 +3209,7 @@ detectMobileDevice() {
         
         // Store or update ship data in the simplified otherPlayers object
         if (!this.otherPlayers[data.playerId]) {
-            console.log(`🚢 Creating new player entry: ${data.playerId}`);
+            debugLog(`🚢 Creating new player entry: ${data.playerId}`);
             this.otherPlayers[data.playerId] = {
                 x: 1000,  // World center
                 y: 750,
@@ -2965,24 +3222,24 @@ detectMobileDevice() {
             };
         } else {
             // Update existing player's ship data
-            console.log(`🚢 Updating ship data for existing player: ${data.playerId}`);
+            debugLog(`🚢 Updating ship data for existing player: ${data.playerId}`);
             this.otherPlayers[data.playerId].shipData = data.shipData;
             if (data.shipData?.name) {
                 this.otherPlayers[data.playerId].playerName = data.shipData.name;
             }
         }
         
-        console.log(`🚢 Total ships tracked: ${Object.keys(this.otherPlayers).length}`);
+        debugLog(`🚢 Total ships tracked: ${Object.keys(this.otherPlayers).length}`);
     }
 
     // Apply ship data to a ship object (properly set ship properties for rendering)
     applyShipData(ship, shipData) {
         if (!shipData) {
-            console.log('🚢 No ship data to apply');
+            debugLog('🚢 No ship data to apply');
             return;
         }
 
-        console.log('🚢 Applying ship data to ship:', {
+        debugLog('🚢 Applying ship data to ship:', {
             customLines: shipData.customLines?.length || 0,
             color: shipData.color,
             thrusterColor: shipData.thrusterColor,
@@ -2998,7 +3255,7 @@ detectMobileDevice() {
         ship.thrusterPoints = shipData.thrusterPoints || [];
         ship.weaponPoints = shipData.weaponPoints || [];
         
-        console.log('🚢 Ship properties after applying data:', {
+        debugLog('🚢 Ship properties after applying data:', {
             shipType: ship.shipType,
             customLinesCount: ship.customLines.length,
             shipColor: ship.shipColor,
@@ -3008,11 +3265,11 @@ detectMobileDevice() {
 
     // Handle request for ship data from new players (like custom-ships-minimal.html)
     handleRequestShipData(data) {
-        console.log('🔄 GAME: Server requesting ship data for new player:', data.newPlayerId);
+        debugLog('🔄 GAME: Server requesting ship data for new player:', data.newPlayerId);
         
         // Send my ship data to help the new player
         if (this.ship && this.sessionId && window.socketManager) {
-            console.log('🚢 GAME: Broadcasting my ship data to new player');
+            debugLog('🚢 GAME: Broadcasting my ship data to new player');
             this.broadcastShipData();
         }
     }
@@ -3020,7 +3277,7 @@ detectMobileDevice() {
     // Broadcast ship data to other players
     broadcastShipData() {
         if (!this.ship || !window.socketManager || !this.sessionId) {
-            console.log('🚢 GAME: Cannot broadcast ship data - missing requirements');
+            debugLog('🚢 GAME: Cannot broadcast ship data - missing requirements');
             return;
         }
 
@@ -3034,15 +3291,15 @@ detectMobileDevice() {
             type: 'custom'
         };
 
-        console.log('🚢 GAME: Broadcasting ship data:', shipData);
+        debugLog('🚢 GAME: Broadcasting ship data:', shipData);
         window.socketManager.broadcastShipData(shipData);
     }
     
     // Spawn a deterministic asteroid for multiplayer
     spawnMultiplayerAsteroid() {
-        console.log('🌑 spawnMultiplayerAsteroid called, isHost =', this.isHost);
+        debugLog('🌑 spawnMultiplayerAsteroid called, isHost =', this.isHost);
         if (!this.isHost) {
-            console.log('🌑 Not host, skipping asteroid spawn');
+            debugLog('🌑 Not host, skipping asteroid spawn');
             return;
         }
         
@@ -3066,7 +3323,7 @@ detectMobileDevice() {
         this.asteroids.push(asteroid);
         
         // Broadcast asteroid spawn to other players
-        console.log('🎮 HOST: Broadcasting asteroid spawn:', asteroidId);
+        debugLog('🎮 HOST: Broadcasting asteroid spawn:', asteroidId);
         window.socketManager.socket.emit('asteroid-spawn', {
             id: asteroidId,
             x: x,
@@ -3082,7 +3339,7 @@ detectMobileDevice() {
     handleAsteroidSpawn(data) {
         if (this.isHost) return; // Host already has the asteroid
         
-        console.log('🎮 CLIENT: Received synchronized asteroid spawn:', data.id);
+        debugLog('🎮 CLIENT: Received synchronized asteroid spawn:', data.id);
         
         // Create deterministic asteroid with exact same parameters
         this.createDeterministicAsteroid(data);
@@ -3090,9 +3347,9 @@ detectMobileDevice() {
     
     // Spawn a host-controlled enemy for multiplayer
     spawnMultiplayerEnemy() {
-        console.log('👾 spawnMultiplayerEnemy called, isHost =', this.isHost);
+        debugLog('👾 spawnMultiplayerEnemy called, isHost =', this.isHost);
         if (!this.isHost) {
-            console.log('👾 Not host, skipping enemy spawn');
+            debugLog('👾 Not host, skipping enemy spawn');
             return;
         }
         
@@ -3113,7 +3370,7 @@ detectMobileDevice() {
             }, 100); // Send enemy updates 10 times per second
         }
         
-        console.log('🎮 HOST: Created enemy:', enemyId);
+        debugLog('🎮 HOST: Created enemy:', enemyId);
     }
     
     // Broadcast all enemy states to other players (host only)
@@ -3151,7 +3408,7 @@ detectMobileDevice() {
                 enemy.id = enemyData.id;
                 enemy.isClientControlled = true; // Mark as client-side copy
                 this.enemies.push(enemy);
-                console.log('🎮 CLIENT: Created new enemy from host:', enemyData.id);
+                debugLog('🎮 CLIENT: Created new enemy from host:', enemyData.id);
             }
             
             // Smooth interpolation for better visual quality
@@ -3167,58 +3424,62 @@ detectMobileDevice() {
         const activeEnemyIds = data.enemies.map(e => e.id);
         this.enemies = this.enemies.filter(e => activeEnemyIds.includes(e.id));
     }
-    
-    // Handle enemy shooting (host broadcasts to clients)
-    handleEnemyShoot(enemyId) {
-        const enemy = this.enemies.find(e => e.id === enemyId);
-        if (enemy) {
-            enemy.shoot();
-        }
-    }
-    
-    // Force spawn objects for testing (simplified - one asteroid only)
+
+    // Force spawn objects for testing (now uses round-based system)
     forceSpawnTestObjects() {
-        console.log('🎮 *** FORCE SPAWN FUNCTION CALLED (SINGLE ASTEROID MODE) ***');
-        
+        debugLog('🎮 *** FORCE SPAWN FUNCTION CALLED (ROUND-BASED MODE) ***');
+
         try {
-            // Check if we already have a mathematical asteroid to prevent duplicates
-            const hasExistingMathAsteroid = this.asteroids.some(a => a.isMathematical);
-            if (hasExistingMathAsteroid) {
-                console.log('🎮 Mathematical asteroid already exists, skipping spawn');
+            // Guard against duplicate spawn scheduling
+            if (this._initialSpawnScheduled) {
+                debugLog('🎮 Initial spawn already scheduled elsewhere, skipping forceSpawn');
                 return;
             }
-            
+            this._initialSpawnScheduled = true;
+
+            // Check if we already have mathematical asteroids to prevent duplicates
+            const hasExistingMathAsteroid = this.asteroids.some(a => a.isMathematical);
+            if (hasExistingMathAsteroid) {
+                debugLog('🎮 Mathematical asteroids already exist, skipping spawn');
+                return;
+            }
+
             // Multiple ways to determine if we should spawn (fix for host detection race condition)
             const sessionManagerHost = window.sessionManager && window.sessionManager.isHost;
             const gameInstanceHost = this.isHost;
             const playerId = window.socketManager?.socket?.id;
             const sessionId = this.sessionId;
-            
+
             // Enhanced host detection - use multiple criteria
             const shouldSpawnAsHost = sessionManagerHost || gameInstanceHost || !sessionId || !playerId;
-            
-            console.log('🎮 Enhanced Spawn Check:', {
+
+            debugLog('🎮 Enhanced Spawn Check:', {
                 sessionManagerHost: sessionManagerHost,
                 gameInstanceHost: gameInstanceHost,
                 playerId: playerId,
                 sessionId: sessionId,
                 shouldSpawnAsHost: shouldSpawnAsHost,
-                hasExistingMathAsteroid: hasExistingMathAsteroid
+                hasExistingMathAsteroid: hasExistingMathAsteroid,
+                currentRound: this.multiplayerRound
             });
-            
+
             if (shouldSpawnAsHost) {
-                console.log('🎮 ✅ SPAWNING: Creating and broadcasting ONE asteroid...');
-                this.createLocalTestObjects();
+                debugLog(`🎮 ✅ SPAWNING: Creating and broadcasting ${this.multiplayerRound} asteroid(s) for Round ${this.multiplayerRound}...`);
+                this.spawnMultiplayerRoundAsteroids(this.multiplayerRound);
+                // CRITICAL: Mark round as started so round completion can trigger
+                this.multiplayerRoundStarted = true;
+                // Reset the zero-asteroids log flag so it can log again when asteroids are actually destroyed
+                this._asteroidsZeroLogged = false;
+                debugLog('🎮 ✅ SPAWNING: multiplayerRoundStarted set to TRUE, _asteroidsZeroLogged reset to FALSE');
             } else {
-                console.log('🎮 ❌ CLIENT: Waiting for host broadcast...');
-                // Set a timeout to spawn fallback asteroid if no broadcast received
-                setTimeout(() => {
-                    const stillNoAsteroid = !this.asteroids.some(a => a.isMathematical);
-                    if (stillNoAsteroid) {
-                        console.log('🎮 ⚠️ FALLBACK: No asteroid received, creating locally...');
-                        this.createLocalTestObjects();
-                    }
-                }, 5000); // Wait 5 seconds for host broadcast
+                debugLog('🎮 ❌ CLIENT: Waiting for host broadcast...');
+                // Fallback spawn disabled - interferes with round progression
+                // Clients should only receive asteroids from host via socket events
+                // But still mark round as started for clients
+                this.multiplayerRoundStarted = true;
+                // Reset the zero-asteroids log flag for clients too
+                this._asteroidsZeroLogged = false;
+                debugLog('🎮 ❌ CLIENT: multiplayerRoundStarted set to TRUE, _asteroidsZeroLogged reset (waiting for asteroids)');
             }
             
         } catch (error) {
@@ -3251,7 +3512,7 @@ detectMobileDevice() {
         
         // Broadcast to other players
         if (window.socketManager && window.socketManager.socket) {
-            console.log('🌑 HOST: Broadcasting synchronized asteroid:', asteroidData.id);
+            debugLog('🌑 HOST: Broadcasting synchronized asteroid:', asteroidData.id);
             window.socketManager.socket.emit('asteroid-spawn', asteroidData);
         }
     }
@@ -3278,7 +3539,7 @@ detectMobileDevice() {
             }, 100); // 10 times per second
         }
         
-        console.log('👾 HOST: Created synchronized enemy:', enemyData.id);
+        debugLog('👾 HOST: Created synchronized enemy:', enemyData.id);
     }
     
     // Create a deterministic asteroid from shared parameters
@@ -3295,7 +3556,7 @@ detectMobileDevice() {
         }
         
         this.asteroids.push(asteroid);
-        console.log('🌑 Created deterministic asteroid:', data.id, 'at', data.x, data.y);
+        debugLog('🌑 Created deterministic asteroid:', data.id, 'at', data.x, data.y);
     }
     
     // Generate consistent asteroid shape from seed
@@ -3323,7 +3584,7 @@ detectMobileDevice() {
     
     // Create mathematical formula-based objects (simplified - one asteroid only)
     createLocalTestObjects() {
-        console.log('🎮 CREATING ONE MATHEMATICAL ASTEROID ONLY');
+        debugLog('🎮 CREATING ONE MATHEMATICAL ASTEROID ONLY');
         
         // Only create ONE mathematically synchronized asteroid
         const currentTime = Date.now();
@@ -3344,28 +3605,28 @@ detectMobileDevice() {
         asteroid.isMathematical = true;
         this.asteroids.push(asteroid);
         
-        console.log('🎮 Created ONE mathematical asteroid:', asteroidData);
+        debugLog('🎮 Created ONE mathematical asteroid:', asteroidData);
         
         // Broadcast ONLY the asteroid parameters to other clients
         if (window.socketManager && window.socketManager.socket && window.socketManager.socket.connected) {
-            console.log('🎮 ✅ Broadcasting single asteroid data to server...');
-            console.log('🎮 ✅ Socket connected:', window.socketManager.socket.connected);
-            console.log('🎮 ✅ Current session:', window.socketManager.currentSessionId);
+            debugLog('🎮 ✅ Broadcasting single asteroid data to server...');
+            debugLog('🎮 ✅ Socket connected:', window.socketManager.socket.connected);
+            debugLog('🎮 ✅ Current session:', window.socketManager.currentSessionId);
             
             // Use acknowledgment callback to ensure broadcast is received
             window.socketManager.socket.emit('math-objects-spawn', {
                 asteroid: asteroidData
             }, (ack) => {
                 if (ack) {
-                    console.log('🎮 ✅ Broadcast acknowledged by server!');
+                    debugLog('🎮 ✅ Broadcast acknowledged by server!');
                 } else {
-                    console.log('🎮 ⚠️ Broadcast sent but no acknowledgment received');
+                    debugLog('🎮 ⚠️ Broadcast sent but no acknowledgment received');
                 }
             });
             
-            console.log('🎮 ✅ Broadcast sent with acknowledgment callback!');
+            debugLog('🎮 ✅ Broadcast sent with acknowledgment callback!');
         } else {
-            console.log('🎮 ❌ ERROR: Cannot broadcast - socket not available:', {
+            debugLog('🎮 ❌ ERROR: Cannot broadcast - socket not available:', {
                 hasSocketManager: !!window.socketManager,
                 hasSocket: !!window.socketManager?.socket,
                 socketConnected: window.socketManager?.socket?.connected,
@@ -3373,25 +3634,25 @@ detectMobileDevice() {
             });
             
             // If broadcast fails, ensure other clients still get asteroids
-            console.log('🎮 ⚠️ Broadcast failed - other clients will use fallback spawn');
+            debugLog('🎮 ⚠️ Broadcast failed - other clients will use fallback spawn');
         }
     }
     
     // Handle mathematical object spawn from other players (simplified - asteroid only)
     handleMathObjectsSpawn(data) {
-        console.log('🎮 Received mathematical asteroid data:', data);
+        debugLog('🎮 Received mathematical asteroid data:', data);
         
         // Create ONLY asteroid with same mathematical parameters
         if (data.asteroid && !this.asteroids.find(a => a.id === data.asteroid.id)) {
-            console.log('🎮 Creating synchronized asteroid with ID:', data.asteroid.id);
+            debugLog('🎮 Creating synchronized asteroid with ID:', data.asteroid.id);
             const asteroid = new Asteroid(data.asteroid.startX, data.asteroid.startY, 2, this); // Size 2 to match
             asteroid.id = data.asteroid.id;
             asteroid.mathData = data.asteroid;
             asteroid.isMathematical = true;
             this.asteroids.push(asteroid);
-            console.log('🎮 Synchronized asteroid created successfully');
+            debugLog('🎮 Synchronized asteroid created successfully');
         } else if (data.asteroid) {
-            console.log('🎮 Asteroid already exists, skipping:', data.asteroid.id);
+            debugLog('🎮 Asteroid already exists, skipping:', data.asteroid.id);
         }
         
         // NO ENEMY PROCESSING - asteroid only for now
@@ -3400,7 +3661,7 @@ detectMobileDevice() {
     // Broadcast ship collision to other clients
     broadcastShipCollision(objectType, objectId, playerId) {
         if (window.socketManager && window.socketManager.socket) {
-            console.log(`🚢 Broadcasting ship collision with ${objectType} ${objectId}`);
+            debugLog(`🚢 Broadcasting ship collision with ${objectType} ${objectId}`);
             window.socketManager.socket.emit('ship-collision', {
                 objectType: objectType,
                 objectId: objectId,
@@ -3413,7 +3674,7 @@ detectMobileDevice() {
     // Broadcast object destruction to other clients
     broadcastObjectDestroyed(objectType, objectId) {
         if (window.socketManager && window.socketManager.socket) {
-            console.log(`🎮 Broadcasting ${objectType} ${objectId} destruction`);
+            debugLog(`🎮 Broadcasting ${objectType} ${objectId} destruction`);
             window.socketManager.socket.emit('math-objects-destroyed', {
                 type: objectType,
                 id: objectId,
@@ -3424,7 +3685,7 @@ detectMobileDevice() {
     
     // Handle ship collision from any client
     handleShipCollision(data) {
-        console.log(`🚢 Received ship collision: player ${data.playerId} hit ${data.objectType} ${data.objectId}`);
+        debugLog(`🚢 Received ship collision: player ${data.playerId} hit ${data.objectType} ${data.objectId}`);
         
         // Process collision for local ship
         if (this.playerId === data.playerId) {
@@ -3436,7 +3697,7 @@ detectMobileDevice() {
         // Process collision for other players' ships
         else if (this.otherPlayers && this.otherPlayers[data.playerId]) {
             const otherPlayer = this.otherPlayers[data.playerId];
-            console.log(`💥 Other player ${data.playerId} ship exploding`);
+            debugLog(`💥 Other player ${data.playerId} ship exploding`);
             
             // Just create debris effect at other player's position
             // Don't manage visibility - let the normal position updates handle that
@@ -3469,7 +3730,7 @@ detectMobileDevice() {
     
     // Handle object destruction from other clients
     handleMathObjectDestroyed(data) {
-        console.log(`🎮 Received ${data.type} ${data.id} destruction`);
+        debugLog(`🎮 Received ${data.type} ${data.id} destruction`);
         
         if (data.type === 'asteroid') {
             // Find and remove the asteroid
@@ -3494,8 +3755,9 @@ detectMobileDevice() {
                 }
                 
                 // Remove the original asteroid
+                debugLog(`💥 SYNC: Removing asteroid at index ${asteroidIndex}, ID: ${data.id}, asteroids before: ${this.asteroids.length}`);
                 this.asteroids.splice(asteroidIndex, 1);
-                console.log(`🎮 Synchronized asteroid ${data.id} destruction`);
+                debugLog(`💥 SYNC: Asteroids after removal: ${this.asteroids.length}`);
             }
         } else if (data.type === 'enemy') {
             // Find and remove the enemy
@@ -3508,8 +3770,440 @@ detectMobileDevice() {
                 
                 // Remove the enemy
                 this.enemies.splice(enemyIndex, 1);
-                console.log(`🎮 Synchronized enemy ${data.id} destruction`);
+                debugLog(`🎮 Synchronized enemy ${data.id} destruction`);
             }
         }
+    }
+
+    // ==================== MULTIPLAYER ROUND PROGRESSION ====================
+
+    // Complete current multiplayer round and transition to next
+    completeMultiplayerRound() {
+        if (!this.isHost) {
+            debugLog('🏆 CLIENT: Round complete, waiting for host to start next round');
+            return;
+        }
+
+        this.roundTransitioning = true;
+        debugLog(`🏆 HOST: Round ${this.multiplayerRound} complete!`);
+
+        // Check if we've completed all 10 rounds
+        const MAX_ROUNDS = 10;
+        if (this.multiplayerRound >= MAX_ROUNDS) {
+            debugLog(`🎉 HOST: All ${MAX_ROUNDS} rounds complete! Game finished!`);
+            setTimeout(() => {
+                this.completeMultiplayerGame();
+            }, 2000);
+            return;
+        }
+
+        // Brief pause before next round
+        setTimeout(() => {
+            this.startNextMultiplayerRound();
+        }, 2000);
+    }
+
+    // Complete the entire multiplayer game (all rounds finished)
+    completeMultiplayerGame() {
+        if (!this.isHost) return;
+
+        debugLog('🎉 HOST: Broadcasting game completion to all clients');
+
+        // Broadcast game completion to all clients
+        if (window.socketManager && window.socketManager.socket && window.socketManager.socket.connected) {
+            window.socketManager.socket.emit('multiplayer-game-complete', {
+                finalRound: this.multiplayerRound,
+                timestamp: Date.now()
+            });
+        }
+
+        // Show completion message locally
+        this.showMultiplayerGameComplete();
+    }
+
+    // Show game completion message (called on all clients)
+    showMultiplayerGameComplete() {
+        debugLog('🎉 All 10 rounds complete! Congratulations!');
+
+        // Show level message with completion text
+        if (this.levelMessage && this.levelNumber) {
+            this.levelNumber.textContent = 'Complete!';
+            this.levelMessage.style.display = 'flex';
+
+            // Keep it displayed longer for completion
+            setTimeout(() => {
+                this.levelMessage.style.display = 'none';
+                // Could show a custom completion screen here
+                alert('🎉 Congratulations! You completed all 10 rounds!');
+            }, 5000);
+        }
+
+        this.roundTransitioning = false;
+        this.gameOver = true;
+    }
+
+    // Start the next multiplayer round (host only)
+    startNextMultiplayerRound() {
+        if (!this.isHost) return;
+
+        this.multiplayerRound++;
+        debugLog(`🚀 HOST: Starting Round ${this.multiplayerRound}`);
+
+        // Mark round as started
+        this.multiplayerRoundStarted = true;
+
+        // Broadcast round transition to all clients
+        if (window.socketManager && window.socketManager.socket && window.socketManager.socket.connected) {
+            window.socketManager.socket.emit('round-transition', {
+                round: this.multiplayerRound,
+                timestamp: Date.now()
+            });
+        }
+
+        // Show round message for host (clients receive via round-transition event)
+        this.showLevelMessage();
+
+        // Spawn asteroids for this round
+        this.spawnMultiplayerRoundAsteroids(this.multiplayerRound);
+
+        // Spawn CPU enemies starting at round 3
+        if (this.multiplayerRound >= 3) {
+            this.spawnMultiplayerEnemies(this.multiplayerRound);
+        }
+
+        this.roundTransitioning = false;
+    }
+
+    // Get enemy count based on round number
+    getEnemyCountForRound(round) {
+        if (round < 3) return 0;
+        if (round <= 5) return 1;
+        if (round <= 8) return 2;
+        return 3; // rounds 9-10
+    }
+
+    // Spawn CPU enemies for multiplayer (host only)
+    spawnMultiplayerEnemies(round) {
+        if (!this.isHost) return;
+
+        const enemyCount = this.getEnemyCountForRound(round);
+        debugLog(`👾 HOST: Spawning ${enemyCount} CPU enemies for Round ${round}`);
+
+        for (let i = 0; i < enemyCount; i++) {
+            setTimeout(() => {
+                this.spawnSingleMultiplayerEnemy(i, round);
+            }, i * 300 + 500); // Stagger spawns, start 500ms after round begins
+        }
+    }
+
+    // Spawn a single multiplayer enemy with synchronization
+    spawnSingleMultiplayerEnemy(index, round) {
+        const spawnTime = Date.now();
+        const enemyId = `enemy_r${round}_${index}_${spawnTime}`;
+
+        // Spawn at random position away from players
+        const bounds = this.getWorldBounds();
+        const width = bounds.enabled ? bounds.width : this.canvas.width;
+        const height = bounds.enabled ? bounds.height : this.canvas.height;
+
+        let x, y, validPosition = false;
+        const minDistanceFromPlayer = 200;
+
+        for (let attempt = 0; attempt < 20; attempt++) {
+            x = 100 + Math.random() * (width - 200);
+            y = 100 + Math.random() * (height - 200);
+
+            let tooClose = false;
+            if (this.ship && !this.ship.exploding) {
+                const dx = this.ship.x - x;
+                const dy = this.ship.y - y;
+                if (Math.sqrt(dx * dx + dy * dy) < minDistanceFromPlayer) {
+                    tooClose = true;
+                }
+            }
+
+            if (!tooClose) {
+                validPosition = true;
+                break;
+            }
+        }
+
+        if (!validPosition) {
+            x = width / 2;
+            y = 100;
+        }
+
+        const enemy = new Enemy(x, y, this);
+        enemy.id = enemyId;
+        enemy.isMultiplayerEnemy = true;
+        enemy.waypointSeed = spawnTime + index;
+        enemy.health = 3;
+        enemy.shootCooldown = 2 + Math.random() * 2; // Don't shoot immediately
+        enemy.generateNextWaypoint();
+
+        this.enemies.push(enemy);
+
+        // Broadcast spawn to clients
+        if (window.socketManager?.socket?.connected) {
+            window.socketManager.socket.emit('enemy-spawn', {
+                id: enemyId,
+                x: x,
+                y: y,
+                angle: enemy.angle,
+                waypointSeed: enemy.waypointSeed,
+                health: enemy.health,
+                shootCooldown: enemy.shootCooldown
+            });
+        }
+
+        debugLog(`👾 HOST: Spawned enemy ${enemyId} at (${x.toFixed(0)}, ${y.toFixed(0)})`);
+    }
+
+    // Broadcast enemy shooting (called from Enemy.multiplayerUpdate)
+    broadcastEnemyShoot(enemy) {
+        if (!this.isHost || !window.socketManager?.socket?.connected) return;
+
+        // Bullet angle needs +PI/2 offset (enemy visual at angle=0 points RIGHT,
+        // but bullet class at angle=0 travels UP)
+        const bulletAngle = enemy.angle + Math.PI / 2;
+
+        window.socketManager.socket.emit('enemy-shoot', {
+            enemyId: enemy.id,
+            x: enemy.x + Math.cos(enemy.angle) * 15,
+            y: enemy.y + Math.sin(enemy.angle) * 15,
+            angle: bulletAngle
+        });
+    }
+
+    // Broadcast all enemy states to clients (called periodically from game loop)
+    broadcastEnemyStates() {
+        if (!this.isHost || !window.socketManager?.socket?.connected) return;
+
+        for (const enemy of this.enemies) {
+            if (enemy.isMultiplayerEnemy && enemy.active) {
+                window.socketManager.socket.emit('enemy-state-update', enemy.getStateForBroadcast());
+            }
+        }
+    }
+
+    // Broadcast enemy destruction to clients
+    broadcastEnemyDestroyedEvent(enemy) {
+        if (!this.isHost || !window.socketManager?.socket?.connected) return;
+
+        debugLog(`👾 HOST: Broadcasting enemy destroyed ${enemy.id}`);
+        window.socketManager.socket.emit('enemy-destroyed', {
+            id: enemy.id
+        });
+    }
+
+    // Spawn multiple mathematical asteroids for a round
+    spawnMultiplayerRoundAsteroids(round) {
+        if (!this.isHost) {
+            debugLog('⚠️ CLIENT: Should not spawn asteroids');
+            return;
+        }
+
+        const asteroidCount = round; // Round 1 = 1 asteroid, Round 2 = 2 asteroids, etc.
+        debugLog(`🌑 HOST: Spawning ${asteroidCount} asteroids for Round ${round}`);
+
+        for (let i = 0; i < asteroidCount; i++) {
+            // Small delay between spawns to prevent collisions
+            setTimeout(() => {
+                this.spawnSingleMathematicalAsteroid(i, round);
+            }, i * 200);
+        }
+    }
+
+    // Spawn a single mathematical asteroid with synchronization
+    spawnSingleMathematicalAsteroid(index, round) {
+        const spawnTime = Date.now();
+        const asteroidId = `asteroid_r${round}_${index}_${spawnTime}`;
+
+        // Use seeded random for consistent randomization
+        const seed = spawnTime + index;
+        const random = this.seededRandom(seed);
+
+        // Random spawn position in the world, away from center where ships are
+        const minDistance = 400; // Min distance from center
+        let x, y;
+        const centerX = this.worldBounds.width / 2;
+        const centerY = this.worldBounds.height / 2;
+
+        do {
+            x = random() * this.worldBounds.width;
+            y = random() * this.worldBounds.height;
+            const distFromCenter = Math.sqrt(
+                Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2)
+            );
+            if (distFromCenter > minDistance) break;
+        } while (true);
+
+        // Mathematical movement data
+        const asteroidData = {
+            id: asteroidId,
+            startX: x,
+            startY: y,
+            spawnTime: spawnTime,
+            baseSpeed: 1 + random() * 0.5,
+            angle: random() * Math.PI * 2,
+            seed: seed,
+            round: round,
+            index: index
+        };
+
+        // Create asteroid locally with mathematical movement
+        const asteroid = new Asteroid(asteroidData.startX, asteroidData.startY, 2, this);
+        asteroid.id = asteroidData.id;
+        asteroid.mathData = asteroidData;
+        asteroid.isMathematical = true;
+        this.asteroids.push(asteroid);
+
+        debugLog(`🌑 HOST: Created asteroid ${index + 1}/${round} for Round ${round}:`, asteroidData.id);
+
+        // Broadcast to other clients
+        if (window.socketManager && window.socketManager.socket && window.socketManager.socket.connected) {
+            window.socketManager.socket.emit('math-objects-spawn', {
+                asteroid: asteroidData
+            }, (ack) => {
+                if (ack) {
+                    debugLog(`✅ Asteroid ${index + 1} broadcast acknowledged`);
+                }
+            });
+        }
+    }
+
+    // Handle round transition from server (for clients)
+    handleRoundTransition(data) {
+        debugLog(`🚀 CLIENT: Received round transition to Round ${data.round}`);
+        this.multiplayerRound = data.round;
+        this.roundTransitioning = false;
+        this.multiplayerRoundStarted = true;
+
+        // Show round transition message
+        this.showLevelMessage();
+    }
+
+    // Handle multiplayer game completion from server (for clients)
+    handleMultiplayerGameComplete(data) {
+        debugLog(`🎉 CLIENT: Received game completion! Final round: ${data.finalRound}`);
+        this.showMultiplayerGameComplete();
+    }
+
+    // Handle CPU enemy spawn from server (for clients)
+    handleEnemySpawn(data) {
+        if (this.isHost) return; // Host already has enemy
+
+        debugLog(`👾 CLIENT: Received enemy spawn ${data.id}`);
+
+        const enemy = new Enemy(data.x, data.y, this);
+        enemy.id = data.id;
+        enemy.isMultiplayerEnemy = true;
+        enemy.waypointSeed = data.waypointSeed;
+        enemy.health = data.health;
+        enemy.angle = data.angle || 0; // Ensure angle is set
+        enemy.shootCooldown = data.shootCooldown || 3; // Ensure cooldown is set
+        enemy.isClientControlled = true; // Client doesn't run AI, just receives updates
+
+        this.enemies.push(enemy);
+    }
+
+    // Handle CPU enemy state updates from server (for clients)
+    handleEnemyStateUpdate(data) {
+        if (this.isHost) return;
+
+        // Validate data
+        if (!isFinite(data.x) || !isFinite(data.y) || !isFinite(data.angle)) {
+            return; // Silently skip invalid updates
+        }
+
+        const enemy = this.enemies.find(e => e.id === data.id);
+        if (enemy) {
+            enemy.setStateFromNetwork(data);
+        }
+    }
+
+    // Handle CPU enemy shooting from server (for clients)
+    handleEnemyShoot(data) {
+        if (this.isHost) return;
+
+        // Validate data to prevent NaN errors
+        if (!isFinite(data.x) || !isFinite(data.y) || !isFinite(data.angle)) {
+            debugLog('👾 CLIENT: Invalid enemy shoot data, skipping', data);
+            return;
+        }
+
+        debugLog(`👾 CLIENT: Enemy ${data.enemyId} shooting at (${data.x.toFixed(0)}, ${data.y.toFixed(0)})`);
+
+        try {
+            const bullet = new Bullet(
+                data.x,
+                data.y,
+                data.angle,
+                0, 0,
+                this,
+                'enemy'
+            );
+            this.bullets.push(bullet);
+        } catch (e) {
+            debugLog('Error creating enemy bullet from network:', e);
+        }
+    }
+
+    // Handle CPU enemy destroyed from server (for clients)
+    handleEnemyDestroyed(data) {
+        if (this.isHost) return;
+
+        debugLog(`👾 CLIENT: Enemy ${data.id} destroyed`);
+
+        const idx = this.enemies.findIndex(e => e.id === data.id);
+        if (idx !== -1) {
+            const enemy = this.enemies[idx];
+            if (typeof this.createDebrisFromEnemy === 'function') {
+                this.createDebrisFromEnemy(enemy);
+            }
+            this.enemies.splice(idx, 1);
+        }
+    }
+
+    handleShipExplosion(data) {
+        if (data.playerId === this.playerId) return;
+
+        debugLog(`💥 Received ship explosion for player ${data.playerId} at (${data.x}, ${data.y})`);
+
+        if (!isFinite(data.x) || !isFinite(data.y)) {
+            debugLog('handleShipExplosion: Invalid position, skipping debris');
+            return;
+        }
+
+        this.createDebrisAtPosition(data.x, data.y);
+    }
+
+    createDebrisAtPosition(x, y) {
+        if (!isFinite(x) || !isFinite(y)) {
+            debugLog('createDebrisAtPosition: Invalid position, skipping debris');
+            return;
+        }
+
+        const numParticles = 20;
+        debugLog(`Creating ship debris at (${x.toFixed(0)}, ${y.toFixed(0)})`);
+
+        for (let i = 0; i < numParticles; i++) {
+            const debris = new Debris(
+                x,
+                y,
+                Math.random() * Math.PI * 2,
+                this
+            );
+            debris.color = i % 2 === 0 ? 'orange' : 'red';
+            this.debris.push(debris);
+        }
+    }
+
+    // Seeded random number generator for consistent randomization
+    seededRandom(seed) {
+        return function() {
+            seed = (seed * 9301 + 49297) % 233280;
+            return seed / 233280;
+        };
     }
 }

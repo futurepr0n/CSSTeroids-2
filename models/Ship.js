@@ -197,6 +197,11 @@ module.exports = (sequelize, DataTypes) => {
         notEmpty: true
       }
     },
+    isPublic: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true
+    },
     createdAt: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW

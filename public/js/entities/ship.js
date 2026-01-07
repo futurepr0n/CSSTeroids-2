@@ -715,28 +715,41 @@ class Ship {
     }
   
     resetShip() {
-        // Reset position to center of screen
-        this.x = this.game.canvas.width / 2;
-        this.y = this.game.canvas.height / 2;
-        
+        // Reset position to center of world/screen
+        if (this.game.isMultiplayer && this.game.isMultiplayer()) {
+            const bounds = this.game.getWorldBounds();
+            if (bounds.enabled) {
+                this.x = bounds.width / 2;
+                this.y = bounds.height / 2;
+            } else {
+                this.x = this.game.canvas.width / 2;
+                this.y = this.game.canvas.height / 2;
+            }
+        } else {
+            this.x = this.game.canvas.width / 2;
+            this.y = this.game.canvas.height / 2;
+        }
+
         // Reset velocity and rotation
         this.thrust = { x: 0, y: 0 };
+        this.xv = 0;
+        this.yv = 0;
         this.angle = 0;
         this.rotation = 0;
-        
+
         // Reset state flags
         this.thrusting = false;
         this.exploding = false;
         this.visible = true;
-        
+
         // Reset shooting cooldown
         this.canShoot = true;
         this.shootTimer = 0;
-        
+
         // Make ship temporarily invulnerable
         this.invulnerable = true;
         this.invulnerableTime = 3; // 3 seconds of invulnerability
-        
+
         // Reset any other properties as needed
         this.blinkTime = 0;
         this.blinkOn = true;

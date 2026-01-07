@@ -9,7 +9,7 @@ class SessionManager {
     // Create a new multiplayer session (using simple approach)
     async createSession(playerData = {}) {
         try {
-            console.log('🎯 SESSION MANAGER: Creating simple session...');
+            debugLog('🎯 SESSION MANAGER: Creating simple session...');
             
             if (!window.socketManager || !window.socketManager.isConnected) {
                 console.error('🚨 Socket manager not connected!');
@@ -42,15 +42,15 @@ class SessionManager {
             this.isHost = true;
             this.gameState = 'waiting';
             
-            console.log('🚨 SESSION MANAGER: HOST STATUS SET TO TRUE (SESSION CREATOR)');
-            console.log('Session created on server:', this.currentSession);
+            debugLog('🚨 SESSION MANAGER: HOST STATUS SET TO TRUE (SESSION CREATOR)');
+            debugLog('Session created on server:', this.currentSession);
             
             // Join the socket room immediately
-            console.log('🎯 HOST: Joining own session via Socket.io:', this.currentSession.id);
+            debugLog('🎯 HOST: Joining own session via Socket.io:', this.currentSession.id);
             const joinResult = window.socketManager.joinSession(this.currentSession.id);
             
             if (joinResult) {
-                console.log('✅ Successfully joined own session');
+                debugLog('✅ Successfully joined own session');
                 return { success: true, session: this.currentSession };
             } else {
                 console.error('❌ Failed to join own session');
@@ -66,7 +66,7 @@ class SessionManager {
     // Join an existing session (using simple approach)
     async joinSession(sessionId, playerData = {}) {
         try {
-            console.log('🎯 SESSION MANAGER: Joining simple session:', sessionId);
+            debugLog('🎯 SESSION MANAGER: Joining simple session:', sessionId);
             
             if (!window.socketManager || !window.socketManager.isConnected) {
                 console.error('🚨 Socket manager not connected!');
@@ -87,14 +87,14 @@ class SessionManager {
             this.isHost = false; // Assume we're not host when joining
             this.gameState = 'waiting';
             
-            console.log('🚨 SESSION MANAGER: HOST STATUS SET TO FALSE (SESSION JOINER)');
-            console.log('Joining session:', sessionId);
+            debugLog('🚨 SESSION MANAGER: HOST STATUS SET TO FALSE (SESSION JOINER)');
+            debugLog('Joining session:', sessionId);
             
             // Join the socket room
             const joinResult = window.socketManager.joinSession(sessionId);
             
             if (joinResult) {
-                console.log('✅ Successfully joined session');
+                debugLog('✅ Successfully joined session');
                 return { success: true, session: this.currentSession };
             } else {
                 console.error('❌ Failed to join session');
@@ -114,7 +114,7 @@ class SessionManager {
         }
 
         try {
-            console.log('🎯 SESSION MANAGER: Leaving session:', this.currentSession.id);
+            debugLog('🎯 SESSION MANAGER: Leaving session:', this.currentSession.id);
             
             // Leave socket room - the server will handle session cleanup automatically
             if (window.socketManager) {
@@ -128,7 +128,7 @@ class SessionManager {
             this.players = [];
             this.gameState = 'waiting';
             
-            console.log('✅ Left session successfully');
+            debugLog('✅ Left session successfully');
             return { success: true };
         } catch (error) {
             console.error('Error leaving session:', error);
@@ -146,13 +146,13 @@ class SessionManager {
     // Get list of available sessions
     async getAvailableSessions() {
         try {
-            console.log('🎯 SESSION MANAGER: Getting available sessions from server...');
+            debugLog('🎯 SESSION MANAGER: Getting available sessions from server...');
             
             const response = await fetch('/api/simple-sessions');
             const data = await response.json();
             
             if (data.success) {
-                console.log('✅ Fetched available sessions:', data.sessions);
+                debugLog('✅ Fetched available sessions:', data.sessions);
                 return { success: true, sessions: data.sessions };
             } else {
                 console.error('Failed to get sessions:', data.error);
@@ -171,12 +171,12 @@ class SessionManager {
         }
 
         try {
-            console.log('🎯 SESSION MANAGER: Refreshing session info for:', this.currentSession.id);
+            debugLog('🎯 SESSION MANAGER: Refreshing session info for:', this.currentSession.id);
             const response = await fetch(`/api/simple-sessions/${this.currentSession.id}`);
             
             // If we get a 404, the server may have restarted - just keep local session
             if (response.status === 404) {
-                console.log('Session not found on server (server may have restarted) - keeping local session');
+                debugLog('Session not found on server (server may have restarted) - keeping local session');
                 // Re-join the session via socket to recreate it on server
                 if (window.socketManager && window.socketManager.isConnected) {
                     window.socketManager.socket.emit('join-simple-session', this.currentSession.id);
@@ -191,14 +191,14 @@ class SessionManager {
                 this.currentSession = data.session;
                 this.gameState = data.session.gameState;
                 
-                console.log('✅ Session info refreshed:', this.currentSession);
+                debugLog('✅ Session info refreshed:', this.currentSession);
                 return { success: true, session: data.session };
             } else {
-                console.log('Failed to refresh, keeping local session:', data.error);
+                debugLog('Failed to refresh, keeping local session:', data.error);
                 return { success: true, session: this.currentSession };
             }
         } catch (error) {
-            console.log('Error refreshing session, keeping local:', error.message);
+            debugLog('Error refreshing session, keeping local:', error.message);
             return { success: true, session: this.currentSession };
         }
     }

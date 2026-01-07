@@ -12,7 +12,7 @@ import { initThrusterMode, clearThrusterPoints, handleThrusterModeClick } from '
 import { initWeaponMode, clearWeaponPoints, handleWeaponModeClick } from '../interaction/weapon-mode.js';
 import { initDrawingModes } from '../drawing/modes.js';
 import { setupPreviewCanvas, startPreviewAnimation } from '../drawing/preview.js';
-import { initSaveButtons, initLoadButton } from '../server/api.js';
+import { initSaveButtons, initLoadButton, loadShipByPassphrase } from '../server/api.js';
 import { createUnifiedClickHandler } from './unified-click-handler.js';
 import '../responsive-canvas.js'; // Import responsive canvas handler
 
@@ -67,29 +67,54 @@ export function initializeApp() {
   
   // 9. Initialize the global clear button
   initGlobalClearButton();
-  
-  // 10. Mobile-specific initializations
+
+  // 10. Initialize visibility toggle
+  initVisibilityToggle();
+
+  // 11. Mobile-specific initializations
   if (window.shipcustomizer.isMobile) {
     initMobileSpecificFeatures();
   }
-  
-  // 11. Force canvas refresh to ensure everything is properly rendered
+
+  // 12. Force canvas refresh to ensure everything is properly rendered
   redrawCanvas();
-  
-  // 12. Log successful initialization
+
+  // 13. Log successful initialization
   console.log('Ship Customizer initialized with settings:', {
     name: shipSettings.name,
     type: shipSettings.type,
     color: shipSettings.color,
     customLinesCount: shipSettings.customLines.length,
     isMobile: window.shipcustomizer.isMobile,
-    handlersRegistered: Boolean(window.shipcustomizer.handleDesignModeClick && 
-                              window.shipcustomizer.handleThrusterModeClick && 
+    handlersRegistered: Boolean(window.shipcustomizer.handleDesignModeClick &&
+                              window.shipcustomizer.handleThrusterModeClick &&
                               window.shipcustomizer.handleWeaponModeClick)
   });
-  
+
   // Add window resize handler
   window.addEventListener('resize', handleWindowResize);
+
+  // 14. Check for URL passphrase parameter and load ship if present
+  checkUrlPassphrase();
+}
+
+/**
+ * Check URL for passphrase parameter and load the ship if found
+ */
+async function checkUrlPassphrase() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const passphrase = urlParams.get('passphrase');
+
+  if (passphrase) {
+    console.log('Found passphrase in URL:', passphrase);
+    const success = await loadShipByPassphrase(passphrase);
+    if (success) {
+      console.log('Ship loaded from URL passphrase');
+      // Clear the URL parameter to prevent reloading on refresh
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+    }
+  }
 }
 
 /**
@@ -185,6 +210,28 @@ function handleWindowResize() {
   detectMobileDevice();
   
   // The responsive-canvas module will handle the canvas resizing
+}
+
+/**
+ * Initialize visibility toggle
+ */
+function initVisibilityToggle() {
+  const visibilityToggle = document.getElementById('ship-visibility');
+  const visibilityHint = document.getElementById('visibility-hint');
+
+  if (visibilityToggle) {
+    visibilityToggle.addEventListener('change', (e) => {
+      shipSettings.isPublic = e.target.checked;
+
+      if (visibilityHint) {
+        visibilityHint.textContent = e.target.checked
+          ? 'Ship will appear in public gallery'
+          : 'Ship is private - only accessible via passphrase';
+      }
+
+      console.log('Ship visibility changed to:', shipSettings.isPublic ? 'public' : 'private');
+    });
+  }
 }
 
 // Create helpful toast notification function

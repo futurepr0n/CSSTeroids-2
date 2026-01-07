@@ -35,11 +35,13 @@ const db = require('./models');
 // Import routes
 const shipRoutes = require('./routes/ships');
 const multiplayerRoutes = require('./routes/multiplayer');
+const adminRoutes = require('./routes/admin');
 
 // Use routes
 app.use('/api/ships', shipRoutes);
 app.use('/api/high-scores', highScoreRoutes);
 app.use('/api/multiplayer', multiplayerRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Test endpoint for connectivity
 app.get('/api/test', (req, res) => {
@@ -437,8 +439,20 @@ io.on('connection', (socket) => {
 
   // Simple session join for minimal test (no database)
   socket.on('join-simple-session', (sessionId) => {
+    // CRITICAL FIX: Prevent unnecessary re-joining of the same session
+    if (socket.currentSession === sessionId) {
+      console.log(`🎮 Socket ${socket.id} already in session ${sessionId}, skipping re-join`);
+      // Just send confirmation without leaving/rejoining
+      socket.emit('session-joined', {
+        sessionId: sessionId,
+        playerId: socket.id,
+        playerCount: io.sockets.adapter.rooms.get(sessionId)?.size || 0
+      });
+      return;
+    }
+
     console.log(`🎮 Socket ${socket.id} joining simple session: ${sessionId}`);
-    
+
     // Leave any previous session and update player count
     if (socket.currentSession) {
       socket.leave(socket.currentSession);
@@ -450,7 +464,7 @@ io.on('connection', (socket) => {
         console.log(`Updated previous session ${socket.currentSession} player count to ${prevRoomSize}`);
       }
     }
-    
+
     // Join new session
     socket.join(sessionId);
     socket.currentSession = sessionId;
@@ -638,10 +652,79 @@ io.on('connection', (socket) => {
   // Handle ship collision events (synchronization)
   socket.on('ship-collision', (data) => {
     if (!socket.currentSession) return;
-    
+
     console.log(`🚢 SERVER: Broadcasting ship collision to session ${socket.currentSession}`);
     // Broadcast to ALL clients in the session, including the sender
     io.to(socket.currentSession).emit('ship-collision', data);
+  });
+
+  // Handle round transitions (multiplayer round progression)
+  socket.on('round-transition', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) {
+      console.log('🏆 SERVER: Rejecting round-transition - no active session');
+      return;
+    }
+
+    console.log(`🏆 SERVER: Broadcasting round transition to Round ${data.round} in session ${activeSession}`);
+    // Broadcast to all other clients in the session
+    socket.to(activeSession).emit('round-transition', data);
+  });
+
+  // Handle multiplayer game completion (all 10 rounds finished)
+  socket.on('multiplayer-game-complete', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) {
+      console.log('🎉 SERVER: Rejecting game-complete - no active session');
+      return;
+    }
+
+    console.log(`🎉 SERVER: Broadcasting game completion (Round ${data.finalRound}) to session ${activeSession}`);
+    // Broadcast to all other clients in the session
+    socket.to(activeSession).emit('multiplayer-game-complete', data);
+  });
+
+  // Handle CPU enemy spawn (multiplayer)
+  socket.on('enemy-spawn', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) return;
+
+    console.log(`👾 SERVER: Broadcasting enemy spawn ${data.id} in session ${activeSession}`);
+    socket.to(activeSession).emit('enemy-spawn', data);
+  });
+
+  // Handle CPU enemy state updates (multiplayer)
+  socket.on('enemy-state-update', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) return;
+
+    socket.to(activeSession).emit('enemy-state-update', data);
+  });
+
+  // Handle CPU enemy shooting (multiplayer)
+  socket.on('enemy-shoot', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) return;
+
+    socket.to(activeSession).emit('enemy-shoot', data);
+  });
+
+  // Handle CPU enemy destroyed (multiplayer)
+  socket.on('enemy-destroyed', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) return;
+
+    console.log(`👾 SERVER: Broadcasting enemy destroyed ${data.id} in session ${activeSession}`);
+    socket.to(activeSession).emit('enemy-destroyed', data);
+  });
+
+  // Handle ship explosion (for syncing explosion effects)
+  socket.on('ship-explosion', (data) => {
+    const activeSession = socket.sessionId || socket.currentSession;
+    if (!activeSession) return;
+
+    console.log(`💥 SERVER: Broadcasting ship explosion for player ${data.playerId} in session ${activeSession}`);
+    socket.to(activeSession).emit('ship-explosion', data);
   });
 });
 
@@ -745,10 +828,15 @@ app.get('/minimal', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'minimal-ships.html'));
 });
 
+// Admin panel
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
 // Sync database and start server
-db.sequelize.sync()
+db.sequelize.sync({ alter: true })
   .then(() => {
-    console.log('Database connected successfully');
+    console.log('Database connected and synced successfully');
     startServer();
   })
   .catch(err => {

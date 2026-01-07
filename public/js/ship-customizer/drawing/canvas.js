@@ -69,28 +69,98 @@ export function redrawCanvas() {
     drawingCanvas = window.shipcustomizer.drawingCanvas;
     drawingCtx = drawingCanvas.getContext('2d');
   }
-  
+
   if (!drawingCtx || !drawingCanvas) {
     console.error("Cannot redraw - missing canvas or context references");
     return;
   }
-  
+
   clearCanvas();
   drawGrid();
   drawOrientationGuides();
+
+  // Draw built-in ship shape if selected
+  drawBuiltInShip();
+
+  // Draw custom lines on top
   drawAllLines();
-  
+
   // Draw in-progress line if any
   drawInProgressLine();
-  
+
   drawThrusterPoints();
   drawWeaponPoints();
-  
+
   // Update line count
   const lineCount = document.getElementById('line-count');
   if (lineCount) {
     lineCount.textContent = shipSettings.customLines ? shipSettings.customLines.length : "0";
   }
+}
+
+/**
+ * Draw the built-in ship shape based on current ship type
+ */
+function drawBuiltInShip() {
+  if (!drawingCtx || !drawingCanvas) return;
+
+  const centerX = drawingCanvas.width / 2;
+  const centerY = drawingCanvas.height / 2;
+  const scale = 4; // Scale up for the drawing canvas
+
+  drawingCtx.strokeStyle = normalizeColor(shipSettings.color);
+  drawingCtx.lineWidth = 2;
+
+  if (shipSettings.type === 'default') {
+    const radius = 40 * scale / 4;
+    const noseX = centerX;
+    const noseY = centerY - radius;
+    const rearLeftX = centerX - radius * 0.7;
+    const rearLeftY = centerY + radius * 0.7;
+    const rearRightX = centerX + radius * 0.7;
+    const rearRightY = centerY + radius * 0.7;
+
+    drawingCtx.beginPath();
+    drawingCtx.moveTo(noseX, noseY);
+    drawingCtx.lineTo(rearLeftX, rearLeftY);
+    drawingCtx.lineTo(rearRightX, rearRightY);
+    drawingCtx.closePath();
+    drawingCtx.stroke();
+  } else if (shipSettings.type === 'triangle') {
+    const radius = 40 * scale / 4;
+    const topX = centerX;
+    const topY = centerY - radius;
+    const bottomLeftX = centerX - radius;
+    const bottomLeftY = centerY + radius;
+    const bottomRightX = centerX + radius;
+    const bottomRightY = centerY + radius;
+
+    drawingCtx.beginPath();
+    drawingCtx.moveTo(topX, topY);
+    drawingCtx.lineTo(bottomLeftX, bottomLeftY);
+    drawingCtx.lineTo(bottomRightX, bottomRightY);
+    drawingCtx.closePath();
+    drawingCtx.stroke();
+  } else if (shipSettings.type === 'diamond') {
+    const radius = 40 * scale / 4;
+    const topX = centerX;
+    const topY = centerY - radius;
+    const rightX = centerX + radius;
+    const rightY = centerY;
+    const bottomX = centerX;
+    const bottomY = centerY + radius;
+    const leftX = centerX - radius;
+    const leftY = centerY;
+
+    drawingCtx.beginPath();
+    drawingCtx.moveTo(topX, topY);
+    drawingCtx.lineTo(rightX, rightY);
+    drawingCtx.lineTo(bottomX, bottomY);
+    drawingCtx.lineTo(leftX, leftY);
+    drawingCtx.closePath();
+    drawingCtx.stroke();
+  }
+  // For 'custom' type, we only draw custom lines (handled by drawAllLines)
 }
 
 /**

@@ -31,6 +31,7 @@
                 <button id="startGameButton" class="menu-button">BLAST OFF!</button>
                 <button id="multiplayerButton" class="menu-button">MULTIPLAYER</button>
                 <button id="shipOptionsButton" class="menu-button">SHIP</button>
+                <button id="browseShipsButton" class="menu-button">BROWSE SHIPS</button>
                 <button id="highScoresButton" class="menu-button">HIGH SCORES</button>
             </div>
         </div>
@@ -121,6 +122,50 @@
             </div>
             <div class="menu-buttons">
                 <button id="backFromHighScoresButton" class="menu-button">BACK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ship Gallery Screen -->
+    <div id="shipGalleryScreen" class="menu-screen">
+        <div class="menu-container ship-gallery-container">
+            <h2>SHIP GALLERY</h2>
+
+            <div class="gallery-content">
+                <button id="galleryPrevButton" class="gallery-nav-button prev">&lt;</button>
+
+                <div class="gallery-ship-display">
+                    <div class="gallery-ship-preview">
+                        <canvas id="galleryShipCanvas" width="300" height="300"></canvas>
+                    </div>
+                    <div class="gallery-ship-info">
+                        <h3 id="galleryShipName">Loading...</h3>
+                        <div class="gallery-ship-details">
+                            <div>Lines: <span id="galleryShipLines">0</span></div>
+                            <div>Color: <span id="galleryShipColor">-</span></div>
+                            <div>Thrusters: <span id="galleryShipThrusters">0</span></div>
+                            <div>Weapons: <span id="galleryShipWeapons">0</span></div>
+                        </div>
+                        <div class="gallery-ship-passphrase">
+                            Passphrase: <span id="galleryShipPassphrase">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="galleryNextButton" class="gallery-nav-button next">&gt;</button>
+            </div>
+
+            <div class="gallery-counter">
+                <span id="galleryCurrentIndex">0</span> / <span id="galleryTotalShips">0</span>
+            </div>
+
+            <div class="gallery-actions">
+                <button id="galleryUseShipButton" class="menu-button">USE THIS SHIP</button>
+                <button id="galleryCustomizeButton" class="menu-button">CUSTOMIZE</button>
+            </div>
+
+            <div class="menu-buttons">
+                <button id="backFromGalleryButton" class="menu-button">BACK</button>
             </div>
         </div>
     </div>

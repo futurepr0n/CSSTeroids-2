@@ -65,13 +65,27 @@ function safeParse(data) {
     return [];
   }
 }
-// GET all ships
+// GET all ships (admin use)
 router.get('/', async (req, res) => {
   try {
     const ships = await Ship.findAll();
     res.json(ships);
   } catch (err) {
     console.error('Error fetching all ships:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// GET public ships only (for gallery)
+router.get('/public', async (req, res) => {
+  try {
+    const ships = await Ship.findAll({
+      where: { isPublic: true },
+      order: [['createdAt', 'DESC']]
+    });
+    res.json(ships);
+  } catch (err) {
+    console.error('Error fetching public ships:', err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -170,21 +184,23 @@ router.post('/', async (req, res) => {
       name: shipData.name,
       type: shipData.type,
       color: shipData.color,
-      customLinesCount: shipData.customLines ? 
+      customLinesCount: shipData.customLines ?
         (Array.isArray(shipData.customLines) ? shipData.customLines.length : 'Not an array') : 0,
-      thrusterPointsCount: shipData.thrusterPoints ? 
+      thrusterPointsCount: shipData.thrusterPoints ?
         (Array.isArray(shipData.thrusterPoints) ? shipData.thrusterPoints.length : 'Not an array') : 0,
-      weaponPointsCount: shipData.weaponPoints ? 
+      weaponPointsCount: shipData.weaponPoints ?
         (Array.isArray(shipData.weaponPoints) ? shipData.weaponPoints.length : 'Not an array') : 0,
-      passphrase: shipData.passphrase || 'New ship - will generate passphrase'
+      passphrase: shipData.passphrase || 'New ship - will generate passphrase',
+      isPublic: shipData.isPublic !== undefined ? shipData.isPublic : true
     });
-    
+
     // Ensure all array data is properly formatted before proceeding
     const processedShipData = {
       ...shipData,
       customLines: Array.isArray(shipData.customLines) ? shipData.customLines : [],
       thrusterPoints: Array.isArray(shipData.thrusterPoints) ? shipData.thrusterPoints : [],
-      weaponPoints: Array.isArray(shipData.weaponPoints) ? shipData.weaponPoints : []
+      weaponPoints: Array.isArray(shipData.weaponPoints) ? shipData.weaponPoints : [],
+      isPublic: shipData.isPublic !== undefined ? shipData.isPublic : true
     };
     
     // If passphrase is provided, try to update existing ship
@@ -207,7 +223,8 @@ router.post('/', async (req, res) => {
           color: processedShipData.color,
           customLines: customLinesJson,
           thrusterPoints: thrusterPointsJson,
-          weaponPoints: weaponPointsJson
+          weaponPoints: weaponPointsJson,
+          isPublic: processedShipData.isPublic
         }, {
           where: { id: existingShip.id }
         });
@@ -257,7 +274,8 @@ router.post('/', async (req, res) => {
       customLines: customLinesJson,
       thrusterPoints: thrusterPointsJson,
       weaponPoints: weaponPointsJson,
-      passphrase: passphrase
+      passphrase: passphrase,
+      isPublic: processedShipData.isPublic
     });
     
     // Get the raw data for the new ship
@@ -284,15 +302,37 @@ router.post('/', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const ship = await Ship.findByPk(req.params.id);
-    
+
     if (!ship) {
       return res.status(404).json({ message: 'Ship not found' });
     }
-    
+
     await ship.destroy();
     res.json({ message: 'Ship deleted' });
   } catch (err) {
     console.error('Error deleting ship:', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// PATCH ship visibility by ID
+router.patch('/:id/visibility', async (req, res) => {
+  try {
+    const ship = await Ship.findByPk(req.params.id);
+
+    if (!ship) {
+      return res.status(404).json({ message: 'Ship not found' });
+    }
+
+    const { isPublic } = req.body;
+    if (typeof isPublic !== 'boolean') {
+      return res.status(400).json({ message: 'isPublic must be a boolean' });
+    }
+
+    await ship.update({ isPublic });
+    res.json({ message: 'Ship visibility updated', isPublic });
+  } catch (err) {
+    console.error('Error updating ship visibility:', err);
     res.status(500).json({ message: err.message });
   }
 });

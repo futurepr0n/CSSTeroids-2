@@ -2,30 +2,44 @@
 class GameMenu {
     constructor(game) {
         this.game = game;
-        
+
         // Menu screens
         this.mainMenuScreen = document.getElementById('mainMenuScreen');
         this.shipCustomizationScreen = document.getElementById('shipCustomizationScreen');
         //this.gameOverScreen = document.getElementById('gameOverScreen');
         this.highScoresScreen = document.getElementById('highScoresScreen');
         this.gameOverHighScoreScreen = document.getElementById('gameOverHighScoreScreen');
-        
+        this.shipGalleryScreen = document.getElementById('shipGalleryScreen');
+
         // Buttons
         this.startGameButton = document.getElementById('startGameButton');
         this.multiplayerButton = document.getElementById('multiplayerButton');
         this.shipOptionsButton = document.getElementById('shipOptionsButton');
+        this.browseShipsButton = document.getElementById('browseShipsButton');
         this.highScoresButton = document.getElementById('highScoresButton');
         this.backFromHighScoresButton = document.getElementById('backFromHighScoresButton');
         this.restartButton = document.getElementById('restartButton');
         this.returnToMenuButton = document.getElementById('returnToMenuButton');
         this.submitScoreButton = document.getElementById('submitScoreButton');
         this.playAgainButton = document.getElementById('playAgainButton');
-        
+
+        // Gallery elements
+        this.galleryPrevButton = document.getElementById('galleryPrevButton');
+        this.galleryNextButton = document.getElementById('galleryNextButton');
+        this.galleryUseShipButton = document.getElementById('galleryUseShipButton');
+        this.galleryCustomizeButton = document.getElementById('galleryCustomizeButton');
+        this.backFromGalleryButton = document.getElementById('backFromGalleryButton');
+        this.galleryShipCanvas = document.getElementById('galleryShipCanvas');
+
+        // Gallery state
+        this.galleryShips = [];
+        this.galleryCurrentIndex = 0;
+
         // Elements
         this.highScoresList = document.getElementById('highScoresList');
         this.highScoreNameInput = document.getElementById('highScoreNameInput');
         this.finalGameScore = document.getElementById('finalGameScore');
-        
+
         this.initEventListeners();
         this.showMainMenu();
     }
@@ -64,7 +78,61 @@ class GameMenu {
                 this.showHighScores();
             });
         }
-        
+
+        // Browse ships button
+        if (this.browseShipsButton) {
+            this.browseShipsButton.addEventListener('click', () => {
+                this.showShipGallery();
+            });
+        }
+
+        // Gallery navigation buttons
+        if (this.galleryPrevButton) {
+            this.galleryPrevButton.addEventListener('click', () => {
+                this.navigateGallery(-1);
+            });
+        }
+
+        if (this.galleryNextButton) {
+            this.galleryNextButton.addEventListener('click', () => {
+                this.navigateGallery(1);
+            });
+        }
+
+        // Gallery action buttons
+        if (this.galleryUseShipButton) {
+            this.galleryUseShipButton.addEventListener('click', () => {
+                this.useGalleryShip();
+            });
+        }
+
+        if (this.galleryCustomizeButton) {
+            this.galleryCustomizeButton.addEventListener('click', () => {
+                this.customizeGalleryShip();
+            });
+        }
+
+        if (this.backFromGalleryButton) {
+            this.backFromGalleryButton.addEventListener('click', () => {
+                this.showMainMenu();
+            });
+        }
+
+        // Keyboard navigation for gallery
+        document.addEventListener('keydown', (e) => {
+            if (this.shipGalleryScreen && this.shipGalleryScreen.style.display === 'flex') {
+                if (e.key === 'ArrowLeft') {
+                    this.navigateGallery(-1);
+                } else if (e.key === 'ArrowRight') {
+                    this.navigateGallery(1);
+                } else if (e.key === 'Escape') {
+                    this.showMainMenu();
+                } else if (e.key === 'Enter') {
+                    this.useGalleryShip();
+                }
+            }
+        });
+
         // Back button from high scores
         if (this.backFromHighScoresButton) {
             this.backFromHighScoresButton.addEventListener('click', () => {
@@ -141,11 +209,12 @@ class GameMenu {
         //if (this.gameOverScreen) this.gameOverScreen.style.display = 'none';
         if (this.highScoresScreen) this.highScoresScreen.style.display = 'none';
         if (this.gameOverHighScoreScreen) this.gameOverHighScoreScreen.style.display = 'none';
-        
+        if (this.shipGalleryScreen) this.shipGalleryScreen.style.display = 'none';
+
         // Hide multiplayer screen if it exists
         const multiplayerScreen = document.getElementById('multiplayerScreen');
         if (multiplayerScreen) multiplayerScreen.style.display = 'none';
-        
+
         // Show the game canvas when hiding menu screens (game is starting)
         const gameCanvas = document.getElementById('gameCanvas');
         if (gameCanvas) gameCanvas.style.display = 'block';
@@ -518,8 +587,267 @@ async loadCustomShipForPreview(canvas, passphrase) {
 loadShipPassphrase(passphrase) {
     // Store the passphrase for later
     localStorage.setItem('selected_ship_passphrase', passphrase);
-    
+
     // Navigate to ship customizer
     window.location.href = 'ship-customization.html?passphrase=' + encodeURIComponent(passphrase);
+}
+
+/**
+ * Shows the ship gallery screen
+ */
+async showShipGallery() {
+    this.hideAllScreens();
+
+    // Hide the game canvas when showing menus
+    const gameCanvas = document.getElementById('gameCanvas');
+    if (gameCanvas) gameCanvas.style.display = 'none';
+
+    // Show the gallery screen
+    if (this.shipGalleryScreen) {
+        this.shipGalleryScreen.style.display = 'flex';
+    }
+
+    // Show loading state
+    const shipName = document.getElementById('galleryShipName');
+    if (shipName) shipName.textContent = 'Loading ships...';
+
+    // Fetch public ships from the server
+    try {
+        const response = await fetch('/api/ships/public');
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.status}`);
+        }
+
+        this.galleryShips = await response.json();
+        this.galleryCurrentIndex = 0;
+
+        // Update total count
+        const totalShips = document.getElementById('galleryTotalShips');
+        if (totalShips) totalShips.textContent = this.galleryShips.length;
+
+        if (this.galleryShips.length === 0) {
+            if (shipName) shipName.textContent = 'No ships found';
+            this.updateGalleryButtons();
+            return;
+        }
+
+        // Render the first ship
+        this.renderCurrentGalleryShip();
+        this.updateGalleryButtons();
+
+    } catch (error) {
+        console.error('Failed to load ships:', error);
+        if (shipName) shipName.textContent = 'Failed to load ships';
+    }
+}
+
+/**
+ * Navigate through the gallery
+ * @param {number} direction - -1 for previous, 1 for next
+ */
+navigateGallery(direction) {
+    if (this.galleryShips.length === 0) return;
+
+    this.galleryCurrentIndex += direction;
+
+    // Wrap around
+    if (this.galleryCurrentIndex < 0) {
+        this.galleryCurrentIndex = this.galleryShips.length - 1;
+    } else if (this.galleryCurrentIndex >= this.galleryShips.length) {
+        this.galleryCurrentIndex = 0;
+    }
+
+    this.renderCurrentGalleryShip();
+    this.updateGalleryButtons();
+}
+
+/**
+ * Update gallery navigation button states
+ */
+updateGalleryButtons() {
+    const hasShips = this.galleryShips.length > 0;
+
+    if (this.galleryPrevButton) {
+        this.galleryPrevButton.disabled = !hasShips;
+        this.galleryPrevButton.style.opacity = hasShips ? '1' : '0.5';
+    }
+
+    if (this.galleryNextButton) {
+        this.galleryNextButton.disabled = !hasShips;
+        this.galleryNextButton.style.opacity = hasShips ? '1' : '0.5';
+    }
+
+    if (this.galleryUseShipButton) {
+        this.galleryUseShipButton.disabled = !hasShips;
+        this.galleryUseShipButton.style.opacity = hasShips ? '1' : '0.5';
+    }
+
+    if (this.galleryCustomizeButton) {
+        this.galleryCustomizeButton.disabled = !hasShips;
+        this.galleryCustomizeButton.style.opacity = hasShips ? '1' : '0.5';
+    }
+}
+
+/**
+ * Render the current ship in the gallery
+ */
+renderCurrentGalleryShip() {
+    if (this.galleryShips.length === 0) return;
+
+    const ship = this.galleryShips[this.galleryCurrentIndex];
+
+    // Update info display
+    const shipName = document.getElementById('galleryShipName');
+    const shipLines = document.getElementById('galleryShipLines');
+    const shipColor = document.getElementById('galleryShipColor');
+    const shipThrusters = document.getElementById('galleryShipThrusters');
+    const shipWeapons = document.getElementById('galleryShipWeapons');
+    const shipPassphrase = document.getElementById('galleryShipPassphrase');
+    const currentIndex = document.getElementById('galleryCurrentIndex');
+
+    if (shipName) shipName.textContent = ship.name || 'Unnamed Ship';
+    if (shipLines) shipLines.textContent = Array.isArray(ship.customLines) ? ship.customLines.length : 0;
+    if (shipColor) shipColor.textContent = ship.color || 'white';
+    if (shipThrusters) shipThrusters.textContent = Array.isArray(ship.thrusterPoints) ? ship.thrusterPoints.length : 0;
+    if (shipWeapons) shipWeapons.textContent = Array.isArray(ship.weaponPoints) ? ship.weaponPoints.length : 0;
+    if (shipPassphrase) shipPassphrase.textContent = ship.passphrase || '-';
+    if (currentIndex) currentIndex.textContent = this.galleryCurrentIndex + 1;
+
+    // Render the ship on canvas
+    this.renderGalleryShipCanvas(ship);
+}
+
+/**
+ * Render a ship on the gallery canvas
+ * @param {Object} ship - The ship data to render
+ */
+renderGalleryShipCanvas(ship) {
+    const canvas = this.galleryShipCanvas;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    // Clear canvas
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, width, height);
+
+    // Draw grid
+    ctx.strokeStyle = 'rgba(50, 50, 50, 0.5)';
+    ctx.lineWidth = 1;
+    const gridSize = 20;
+    for (let x = 0; x <= width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+    }
+    for (let y = 0; y <= height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+    }
+
+    // Draw center crosshair
+    ctx.strokeStyle = 'rgba(100, 100, 100, 0.8)';
+    ctx.beginPath();
+    ctx.moveTo(centerX - 15, centerY);
+    ctx.lineTo(centerX + 15, centerY);
+    ctx.moveTo(centerX, centerY - 15);
+    ctx.lineTo(centerX, centerY + 15);
+    ctx.stroke();
+
+    // Scale factor (original designs are for 400x400)
+    const scale = Math.min(width, height) / 400 * 0.8;
+
+    // Draw custom lines
+    if (ship.customLines && Array.isArray(ship.customLines) && ship.customLines.length > 0) {
+        ship.customLines.forEach(line => {
+            ctx.strokeStyle = line.color || ship.color || 'white';
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+
+            ctx.beginPath();
+            ctx.moveTo(centerX + line.startX * scale, centerY + line.startY * scale);
+            ctx.lineTo(centerX + line.endX * scale, centerY + line.endY * scale);
+            ctx.stroke();
+        });
+    } else {
+        // Draw default ship shape if no custom lines
+        const radius = 40 * scale;
+        ctx.strokeStyle = ship.color || 'white';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY - radius);
+        ctx.lineTo(centerX - radius * 0.7, centerY + radius * 0.7);
+        ctx.lineTo(centerX, centerY + radius * 0.4);
+        ctx.lineTo(centerX + radius * 0.7, centerY + radius * 0.7);
+        ctx.closePath();
+        ctx.stroke();
+    }
+
+    // Draw thruster points
+    if (ship.thrusterPoints && Array.isArray(ship.thrusterPoints)) {
+        ctx.fillStyle = 'orange';
+        ship.thrusterPoints.forEach(point => {
+            ctx.beginPath();
+            ctx.arc(centerX + point.x * scale, centerY + point.y * scale, 4, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    }
+
+    // Draw weapon points
+    if (ship.weaponPoints && Array.isArray(ship.weaponPoints)) {
+        ctx.fillStyle = 'cyan';
+        ship.weaponPoints.forEach(point => {
+            ctx.beginPath();
+            ctx.arc(centerX + point.x * scale, centerY + point.y * scale, 4, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    }
+}
+
+/**
+ * Use the currently selected ship - loads it and returns to main menu
+ */
+useGalleryShip() {
+    if (this.galleryShips.length === 0) return;
+
+    const ship = this.galleryShips[this.galleryCurrentIndex];
+
+    // Save to asteroids_playerSettings (the format ship.js expects)
+    const playerSettings = {
+        shipType: 'custom',
+        shipColor: ship.color || 'white',
+        customLines: ship.customLines || [],
+        thrusterPoints: ship.thrusterPoints || [],
+        weaponPoints: ship.weaponPoints || [],
+        shipName: ship.name || 'Custom Ship',
+        passphrase: ship.passphrase
+    };
+
+    localStorage.setItem('asteroids_playerSettings', JSON.stringify(playerSettings));
+    localStorage.setItem('selected_ship_passphrase', ship.passphrase);
+
+    console.log('Ship loaded:', ship.name, '- returning to main menu');
+
+    // Return to main menu so user can choose game mode
+    this.showMainMenu();
+}
+
+/**
+ * Open the ship customizer with the current ship
+ */
+customizeGalleryShip() {
+    if (this.galleryShips.length === 0) return;
+
+    const ship = this.galleryShips[this.galleryCurrentIndex];
+
+    // Navigate to ship customizer with passphrase
+    window.location.href = 'ship-customization.html?passphrase=' + encodeURIComponent(ship.passphrase);
 }
 }

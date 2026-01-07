@@ -162,6 +162,18 @@
             <input type="text" id="ship-name" placeholder="Enter a name for your ship" maxlength="30">
           </div>
           
+          <div class="info-group visibility-toggle">
+            <label for="ship-visibility">Gallery Visibility:</label>
+            <div class="toggle-container">
+              <input type="checkbox" id="ship-visibility" checked>
+              <label for="ship-visibility" class="toggle-label">
+                <span class="toggle-text public">PUBLIC</span>
+                <span class="toggle-text private">PRIVATE</span>
+              </label>
+            </div>
+            <div class="visibility-hint" id="visibility-hint">Ship will appear in public gallery</div>
+          </div>
+
           <div id="saved-ship-container" style="display: none;">
             <div class="info-group">
               <label>Ship Passphrase:</label>

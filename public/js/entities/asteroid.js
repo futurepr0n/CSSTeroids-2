@@ -52,35 +52,48 @@ class Asteroid {
     updateMathematicalMovement() {
         const currentTime = Date.now();
         const elapsedTime = (currentTime - this.mathData.spawnTime) / 1000; // Convert to seconds
-        
+
         // Calculate position using mathematical formula
         // Linear movement with bouncing
         let x = this.mathData.startX + Math.cos(this.mathData.angle) * this.mathData.baseSpeed * elapsedTime * 50;
         let y = this.mathData.startY + Math.sin(this.mathData.angle) * this.mathData.baseSpeed * elapsedTime * 50;
-        
-        // Handle bouncing off world boundaries mathematically (fixed algorithm)
+
+        // Handle bouncing off world boundaries mathematically (improved algorithm)
         const bounds = this.game.getWorldBounds();
         if (bounds.enabled) {
             const effectiveWidth = bounds.width - 2 * this.radius;
             const effectiveHeight = bounds.height - 2 * this.radius;
-            
-            // Use modulo arithmetic for perfect bouncing (prevents infinite loops)
-            const rawX = x - this.radius;
-            const rawY = y - this.radius;
-            
-            const normalizedX = rawX % (2 * effectiveWidth);
-            const normalizedY = rawY % (2 * effectiveHeight);
-            
+
+            // Use modulo arithmetic for perfect bouncing
+            // Shift to make calculations start at 0
+            let rawX = x - this.radius;
+            let rawY = y - this.radius;
+
+            // Handle negative values properly with modulo
+            // JavaScript's modulo can return negative values, so we normalize
+            const normalizeModulo = (value, mod) => {
+                const result = value % (2 * mod);
+                return result < 0 ? result + (2 * mod) : result;
+            };
+
+            const normalizedX = normalizeModulo(rawX, effectiveWidth);
+            const normalizedY = normalizeModulo(rawY, effectiveHeight);
+
             // Mathematical reflection using modulo
-            x = (normalizedX <= effectiveWidth) ? 
-                normalizedX + this.radius : 
+            // If in first half, use value as-is; if in second half, reflect back
+            x = (normalizedX <= effectiveWidth) ?
+                normalizedX + this.radius :
                 (2 * effectiveWidth - normalizedX) + this.radius;
-                
-            y = (normalizedY <= effectiveHeight) ? 
-                normalizedY + this.radius : 
+
+            y = (normalizedY <= effectiveHeight) ?
+                normalizedY + this.radius :
                 (2 * effectiveHeight - normalizedY) + this.radius;
+
+            // Ensure bounds are strictly enforced (safety check)
+            x = Math.max(this.radius, Math.min(bounds.width - this.radius, x));
+            y = Math.max(this.radius, Math.min(bounds.height - this.radius, y));
         }
-        
+
         this.x = x;
         this.y = y;
     }

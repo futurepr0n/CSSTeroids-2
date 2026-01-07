@@ -4,20 +4,44 @@ class Enemy {
         this.x = x;
         this.y = y;
         this.game = game;
-        
+
         // Movement properties
         this.angle = Math.random() * Math.PI * 2; // Random initial angle
         this.speed = 60 + Math.random() * 30; // Speed in pixels per second
         this.rotationSpeed = 1.5; // Radians per second
         this.shootCooldown = 0;
         this.shootInterval = 2 + Math.random() * 2; // Random interval between 2-4 seconds
-        
+
         // Visual properties
         this.radius = 15;
         this.color = 'red';
-        
+
         // State
         this.active = true;
+
+        // Multiplayer properties
+        this.id = null;
+        this.isMultiplayerEnemy = false;
+        this.health = 3;
+        this.mode = 'patrol'; // 'patrol' or 'pursuit'
+        this.currentWaypoint = { x: 0, y: 0 };
+        this.waypointSeed = Date.now();
+        this.waypointIndex = 0;
+        this.pursuitTarget = null;
+        this.proximityThreshold = 200;
+        this.disengageThreshold = 300;
+        this.patrolSpeed = 80;
+        this.pursuitSpeed = 120;
+
+        // Target switching system
+        this.designatedTargetId = null; // 'main' for local ship, or playerId for other players
+        this.aggroDistance = 150; // Distance at which a bullet draws aggro
+
+        // Interpolation for smooth client movement
+        this.targetX = this.x;
+        this.targetY = this.y;
+        this.targetAngle = this.angle;
+        this.lerpSpeed = 10; // Interpolation speed multiplier
     }
     
     update(dt) {
@@ -62,7 +86,12 @@ class Enemy {
     
     draw(ctx) {
         if (!this.active) return;
-        
+
+        // Prevent canvas crash from NaN values
+        if (!isFinite(this.x) || !isFinite(this.y) || !isFinite(this.angle)) {
+            return;
+        }
+
         // Draw enemy ship
         ctx.save();
         ctx.translate(this.x, this.y);
@@ -250,13 +279,18 @@ class Enemy {
         if (!this.game.ship || this.game.ship.exploding || this.game.demoMode) {
             return null;
         }
-        
+
         try {
+            // Bullet class uses sin/cos convention where angle=0 points UP
+            // Enemy visual has nose pointing RIGHT at angle=0
+            // So we need to offset by +PI/2 to align bullet direction with visual
+            const bulletAngle = this.angle + Math.PI / 2;
+
             // Create a new bullet with proper parameters
             const bullet = new Bullet(
                 this.x + Math.cos(this.angle) * 15, // Start at the nose of the ship
                 this.y + Math.sin(this.angle) * 15,
-                this.angle,
+                bulletAngle, // Offset angle for bullet travel direction
                 0, // No ship velocity x component
                 0, // No ship velocity y component
                 this.game,
@@ -279,6 +313,377 @@ class Enemy {
         // Notify game to create explosion effect
         if (typeof this.game.createDebrisFromEnemy === 'function') {
             this.game.createDebrisFromEnemy(this);
+        }
+    }
+
+    // Multiplayer-specific methods
+
+    multiplayerUpdate(dt) {
+        if (!this.active || !this.isMultiplayerEnemy) return;
+
+        // Check if current target is still valid
+        this.updateTargetValidity();
+
+        if (this.mode === 'patrol') {
+            this.moveToWaypoint(dt);
+            this.checkForNearbyPlayers();
+        } else {
+            this.pursuePlayer(dt);
+            this.checkIfLostTarget();
+        }
+
+        // Only aim at the designated target if we have one, otherwise aim at nearest valid
+        if (this.designatedTargetId) {
+            this.aimAtDesignatedTarget();
+        } else {
+            this.aimAtNearestPlayer();
+        }
+
+        this.shootCooldown -= dt;
+        if (this.shootCooldown <= 0) {
+            const bullet = this.shoot();
+            if (bullet && this.game.isHost) {
+                this.game.broadcastEnemyShoot(this);
+            }
+            this.shootCooldown = this.shootInterval;
+        }
+    }
+
+    seededRandom() {
+        this.waypointSeed = (this.waypointSeed * 9301 + 49297) % 233280;
+        return this.waypointSeed / 233280;
+    }
+
+    generateNextWaypoint() {
+        const bounds = this.game.getWorldBounds();
+        const margin = 100;
+        const width = bounds.enabled ? bounds.width : this.game.canvas.width;
+        const height = bounds.enabled ? bounds.height : this.game.canvas.height;
+
+        this.currentWaypoint = {
+            x: margin + this.seededRandom() * (width - margin * 2),
+            y: margin + this.seededRandom() * (height - margin * 2)
+        };
+        this.waypointIndex++;
+    }
+
+    moveToWaypoint(dt) {
+        if (!this.currentWaypoint.x && !this.currentWaypoint.y) {
+            this.generateNextWaypoint();
+        }
+
+        const dx = this.currentWaypoint.x - this.x;
+        const dy = this.currentWaypoint.y - this.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < 30) {
+            this.generateNextWaypoint();
+            return;
+        }
+
+        const targetAngle = Math.atan2(dy, dx);
+        this.x += Math.cos(targetAngle) * this.patrolSpeed * dt;
+        this.y += Math.sin(targetAngle) * this.patrolSpeed * dt;
+
+        this.handleBoundaryBounce();
+    }
+
+    checkForNearbyPlayers() {
+        const nearest = this.findNearestPlayer(true); // Exclude invulnerable
+        if (nearest && nearest.distance < this.proximityThreshold) {
+            this.mode = 'pursuit';
+            this.pursuitTarget = nearest;
+            // Set designated target
+            if (nearest.isMainShip) {
+                this.designatedTargetId = 'main';
+            } else if (nearest.playerId) {
+                this.designatedTargetId = nearest.playerId;
+            }
+        }
+    }
+
+    pursuePlayer(dt) {
+        if (!this.pursuitTarget) {
+            this.mode = 'patrol';
+            this.generateNextWaypoint(); // Get a new waypoint to move to
+            return;
+        }
+
+        const target = this.getTargetPosition(this.pursuitTarget);
+        if (!target) {
+            // Target is no longer valid (dead/invulnerable), go back to patrol
+            this.mode = 'patrol';
+            this.pursuitTarget = null;
+            this.generateNextWaypoint(); // Get a new waypoint away from current position
+            return;
+        }
+
+        const dx = target.x - this.x;
+        const dy = target.y - this.y;
+        const targetAngle = Math.atan2(dy, dx);
+
+        this.x += Math.cos(targetAngle) * this.pursuitSpeed * dt;
+        this.y += Math.sin(targetAngle) * this.pursuitSpeed * dt;
+
+        this.handleBoundaryBounce();
+    }
+
+    getTargetPosition(target) {
+        if (target.isMainShip && this.game.ship && !this.game.ship.exploding && !this.game.ship.invulnerable) {
+            return { x: this.game.ship.x, y: this.game.ship.y };
+        } else if (target.playerId && this.game.otherPlayers) {
+            const player = this.game.otherPlayers[target.playerId];
+            if (player && !player.exploding && !player.invulnerable) {
+                return { x: player.x, y: player.y };
+            }
+        }
+        return null;
+    }
+
+    checkIfLostTarget() {
+        if (!this.pursuitTarget) {
+            this.mode = 'patrol';
+            this.generateNextWaypoint();
+            return;
+        }
+
+        const target = this.getTargetPosition(this.pursuitTarget);
+        if (!target) {
+            // Target is invalid (dead, invulnerable, or disconnected)
+            this.mode = 'patrol';
+            this.pursuitTarget = null;
+            this.generateNextWaypoint();
+            return;
+        }
+
+        const dx = target.x - this.x;
+        const dy = target.y - this.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance > this.disengageThreshold) {
+            this.mode = 'patrol';
+            this.pursuitTarget = null;
+            this.generateNextWaypoint();
+        }
+    }
+
+    findNearestPlayer(excludeInvulnerable = true) {
+        let nearest = null;
+        let nearestDistance = Infinity;
+
+        if (this.game.ship && !this.game.ship.exploding) {
+            // Skip invulnerable players when excludeInvulnerable is true
+            if (!excludeInvulnerable || !this.game.ship.invulnerable) {
+                const dx = this.game.ship.x - this.x;
+                const dy = this.game.ship.y - this.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearest = { isMainShip: true, distance: distance };
+                }
+            }
+        }
+
+        if (this.game.otherPlayers) {
+            for (const playerId in this.game.otherPlayers) {
+                const player = this.game.otherPlayers[playerId];
+                // Skip exploding or invulnerable players
+                if (player.exploding) continue;
+                if (excludeInvulnerable && player.invulnerable) continue;
+                const dx = player.x - this.x;
+                const dy = player.y - this.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearest = { playerId: playerId, distance: distance };
+                }
+            }
+        }
+
+        return nearest;
+    }
+
+    aimAtNearestPlayer() {
+        const nearest = this.findNearestPlayer();
+        if (!nearest) return;
+
+        let targetX, targetY;
+        if (nearest.isMainShip) {
+            targetX = this.game.ship.x;
+            targetY = this.game.ship.y;
+        } else if (nearest.playerId && this.game.otherPlayers[nearest.playerId]) {
+            targetX = this.game.otherPlayers[nearest.playerId].x;
+            targetY = this.game.otherPlayers[nearest.playerId].y;
+        } else {
+            return;
+        }
+
+        const dx = targetX - this.x;
+        const dy = targetY - this.y;
+        const targetAngle = Math.atan2(dy, dx);
+
+        let angleDiff = targetAngle - this.angle;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+        this.angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), this.rotationSpeed * 0.016);
+    }
+
+    aimAtDesignatedTarget() {
+        const targetPos = this.getDesignatedTargetPosition();
+        if (!targetPos) {
+            // Fallback to nearest player if designated target is invalid
+            this.aimAtNearestPlayer();
+            return;
+        }
+
+        const dx = targetPos.x - this.x;
+        const dy = targetPos.y - this.y;
+        const targetAngle = Math.atan2(dy, dx);
+
+        let angleDiff = targetAngle - this.angle;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+        this.angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), this.rotationSpeed * 0.016);
+    }
+
+    getStateForBroadcast() {
+        return {
+            id: this.id,
+            x: this.x,
+            y: this.y,
+            angle: this.angle,
+            health: this.health,
+            mode: this.mode,
+            waypointIndex: this.waypointIndex
+        };
+    }
+
+    setStateFromNetwork(data) {
+        // Set target values for interpolation (smooth movement)
+        if (isFinite(data.x)) this.targetX = data.x;
+        if (isFinite(data.y)) this.targetY = data.y;
+        if (isFinite(data.angle)) this.targetAngle = data.angle;
+        if (typeof data.health === 'number') this.health = data.health;
+        if (data.mode) this.mode = data.mode;
+    }
+
+    // Interpolate towards target position (called for client-controlled enemies)
+    interpolatePosition(dt) {
+        if (!this.isClientControlled) return;
+
+        const lerpFactor = Math.min(1, this.lerpSpeed * dt);
+
+        // Lerp position
+        this.x += (this.targetX - this.x) * lerpFactor;
+        this.y += (this.targetY - this.y) * lerpFactor;
+
+        // Lerp angle (handle wraparound)
+        let angleDiff = this.targetAngle - this.angle;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        this.angle += angleDiff * lerpFactor;
+    }
+
+    takeDamage() {
+        this.health--;
+        if (this.health <= 0) {
+            this.hit();
+            return true;
+        }
+        return false;
+    }
+
+    // Target switching system methods
+
+    // Check if the designated target is still valid (alive and not invulnerable)
+    isDesignatedTargetValid() {
+        if (!this.designatedTargetId) return false;
+
+        if (this.designatedTargetId === 'main') {
+            return this.game.ship && !this.game.ship.exploding && !this.game.ship.invulnerable;
+        } else {
+            const player = this.game.otherPlayers?.[this.designatedTargetId];
+            return player && !player.exploding && !player.invulnerable;
+        }
+    }
+
+    // Get the position of the designated target
+    getDesignatedTargetPosition() {
+        if (!this.designatedTargetId) return null;
+
+        if (this.designatedTargetId === 'main') {
+            if (this.game.ship && !this.game.ship.exploding && !this.game.ship.invulnerable) {
+                return { x: this.game.ship.x, y: this.game.ship.y };
+            }
+        } else {
+            const player = this.game.otherPlayers?.[this.designatedTargetId];
+            if (player && !player.exploding && !player.invulnerable) {
+                return { x: player.x, y: player.y };
+            }
+        }
+        return null;
+    }
+
+    // Switch to the next available target, or clear target if none available
+    switchToNextTarget() {
+        // Find a valid target that is NOT the current one
+        const nearest = this.findNearestPlayer(true); // true = exclude invulnerable
+
+        if (nearest) {
+            if (nearest.isMainShip) {
+                this.designatedTargetId = 'main';
+            } else if (nearest.playerId) {
+                this.designatedTargetId = nearest.playerId;
+            }
+            this.mode = 'pursuit';
+            this.pursuitTarget = nearest;
+        } else {
+            // No valid targets, go to patrol
+            this.designatedTargetId = null;
+            this.mode = 'patrol';
+            this.pursuitTarget = null;
+            this.generateNextWaypoint();
+        }
+    }
+
+    // Check if a bullet fired from a position should steal aggro
+    // Called by game when a player shoots
+    checkBulletAggro(bulletX, bulletY, shooterId) {
+        // Calculate distance from bullet to enemy
+        const dx = bulletX - this.x;
+        const dy = bulletY - this.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        // If bullet is within aggro range and from a different player than current target
+        if (distance < this.aggroDistance) {
+            // Only steal aggro if the shooter is not the current target
+            const currentTargetIsShooter =
+                (this.designatedTargetId === 'main' && shooterId === 'main') ||
+                (this.designatedTargetId === shooterId);
+
+            if (!currentTargetIsShooter) {
+                // Steal aggro!
+                this.designatedTargetId = shooterId;
+                this.mode = 'pursuit';
+
+                // Update pursuit target
+                if (shooterId === 'main') {
+                    this.pursuitTarget = { isMainShip: true, distance: distance };
+                } else {
+                    this.pursuitTarget = { playerId: shooterId, distance: distance };
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Update target validity and switch if needed (call this in multiplayerUpdate)
+    updateTargetValidity() {
+        if (!this.isDesignatedTargetValid()) {
+            this.switchToNextTarget();
         }
     }
 }
