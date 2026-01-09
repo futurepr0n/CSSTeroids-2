@@ -36,8 +36,13 @@ class SocketManager {
             debugLog('🔌 SOCKET: Initializing Socket.io connection...');
             
             // Configure Socket.io with explicit server URL and options
-            const serverUrl = `${window.location.protocol}//${window.location.hostname}:6161`;
-            debugLog('🔌 SOCKET: Connecting to server at:', serverUrl);
+            // Local dev: connect directly to port 6161
+            // Production: connect to origin (nginx proxies 443 → internal 6161)
+            const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            const serverUrl = isLocalDev
+                ? `${window.location.protocol}//${window.location.hostname}:6161`
+                : window.location.origin;
+            debugLog('🔌 SOCKET: Connecting to server at:', serverUrl, '(localDev:', isLocalDev, ')');
             
             this.socket = io(serverUrl, {
                 transports: ['websocket', 'polling'], // Try websocket first, fallback to polling
