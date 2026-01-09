@@ -893,30 +893,66 @@ detectMobileDevice() {
     }
     
     drawSimpleStarfield() {
-        // Simple starfield for multiplayer that doesn't move with camera
-        // Each player gets their own random starfield
-        if (!this.starPositions) {
-            this.starPositions = [];
-            const numStars = 100;
-            for (let i = 0; i < numStars; i++) {
-                this.starPositions.push({
-                    x: Math.random() * this.canvas.width,
-                    y: Math.random() * this.canvas.height,
-                    size: Math.random() * 2 + 0.5,
-                    twinkleOffset: Math.random() * Math.PI * 2
-                });
-            }
+        // Parallax starfield for multiplayer - creates illusion of movement
+        // Stars are created in world-space and move at reduced speed relative to camera
+        if (!this.parallaxStars) {
+            this.parallaxStars = [];
+            const layers = [
+                { count: 60, parallax: 0.1, minSize: 0.3, maxSize: 0.8, alpha: 0.4 },
+                { count: 40, parallax: 0.25, minSize: 0.5, maxSize: 1.2, alpha: 0.6 },
+                { count: 30, parallax: 0.4, minSize: 0.8, maxSize: 1.8, alpha: 0.8 }
+            ];
+
+            const worldW = this.worldBounds?.width || 2000;
+            const worldH = this.worldBounds?.height || 2000;
+            const padding = 200;
+
+            layers.forEach(layer => {
+                for (let i = 0; i < layer.count; i++) {
+                    this.parallaxStars.push({
+                        baseX: -padding + Math.random() * (worldW + padding * 2),
+                        baseY: -padding + Math.random() * (worldH + padding * 2),
+                        size: layer.minSize + Math.random() * (layer.maxSize - layer.minSize),
+                        parallax: layer.parallax,
+                        alpha: layer.alpha,
+                        twinkleOffset: Math.random() * Math.PI * 2,
+                        twinkleSpeed: 1 + Math.random() * 2
+                    });
+                }
+            });
         }
-        
+
         const time = performance.now() / 1000;
-        this.ctx.fillStyle = 'white';
-        
-        this.starPositions.forEach(star => {
-            const twinkle = 0.7 + 0.3 * Math.sin(time * 2 + star.twinkleOffset);
+        const camX = this.camera?.x || 0;
+        const camY = this.camera?.y || 0;
+        const canvasW = this.canvas.width;
+        const canvasH = this.canvas.height;
+        const worldW = this.worldBounds?.width || 2000;
+        const worldH = this.worldBounds?.height || 2000;
+
+        this.parallaxStars.forEach(star => {
+            const parallaxOffsetX = camX * (1 - star.parallax);
+            const parallaxOffsetY = camY * (1 - star.parallax);
+
+            let screenX = star.baseX + camX - parallaxOffsetX;
+            let screenY = star.baseY + camY - parallaxOffsetY;
+
+            const tileW = worldW + 400;
+            const tileH = worldH + 400;
+            screenX = ((screenX % tileW) + tileW) % tileW - 200;
+            screenY = ((screenY % tileH) + tileH) % tileH - 200;
+
+            if (screenX < -10 || screenX > canvasW + 10 ||
+                screenY < -10 || screenY > canvasH + 10) {
+                return;
+            }
+
+            const twinkle = 0.7 + 0.3 * Math.sin(time * star.twinkleSpeed + star.twinkleOffset);
             const size = star.size * twinkle;
-            
+
+            this.ctx.fillStyle = `rgba(255, 255, 255, ${star.alpha * twinkle})`;
             this.ctx.beginPath();
-            this.ctx.arc(star.x, star.y, size, 0, Math.PI * 2);
+            this.ctx.arc(screenX, screenY, size, 0, Math.PI * 2);
             this.ctx.fill();
         });
     }
