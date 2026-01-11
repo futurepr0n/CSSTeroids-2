@@ -5,42 +5,44 @@ class Bullet {
         this.y = y;
         this.angle = angle;
         this.speed = 400; // pixels per second
-        this.radius = 2;
+        this.radius = 3; // Slightly larger for better visibility
         this.game = game; // Reference to game instance
         this.source = source; // 'player' or 'enemy'
         this.ownerId = ownerId; // ID of the player who fired this bullet (for multiplayer)
-        
-        // Base bullet speed
-        const baseSpeed = 6;
-        
+
+        // Use slightly higher speed for MMO/multiplayer but not too much
+        const isLargeWorld = game.isMultiplayer?.() || game.isMMO?.();
+        const baseSpeed = isLargeWorld ? 8 : 6;
+
         // If firing from multiple weapon points, reduce range
-        this.initialSpeed = weaponCount > 1 ? baseSpeed * 0.67 : baseSpeed;
+        this.initialSpeed = weaponCount > 1 ? baseSpeed * 0.75 : baseSpeed;
         this.currentSpeed = this.initialSpeed;
-        
+
         // Calculate velocity components
         this.xv = Math.sin(angle) * this.currentSpeed + (shipXv || 0) * 0.5;
         this.yv = -Math.cos(angle) * this.currentSpeed + (shipYv || 0) * 0.5;
-        
-        // Lifetime tracking (in seconds)
+
+        // Lifetime tracking (in seconds) - slightly longer for larger worlds
         this.lifeTime = 0;
-        this.maxLifeTime = weaponCount > 1 ? 1.0 : 1.5; // Shorter lifetime for multiple bullets
+        const baseLifeTime = isLargeWorld ? 1.8 : 1.5;
+        this.maxLifeTime = weaponCount > 1 ? baseLifeTime * 0.7 : baseLifeTime;
     }
     
-        update(dt) {
-            // Move the bullet
-            this.x += this.xv;
-            this.y += this.yv;
-            
-            // Apply gradual slowdown
-            this.currentSpeed *= 0.99;
-            
-            // Maintain original direction while reducing speed
-            const originalAngle = this.angle;
-            this.xv = this.currentSpeed * Math.sin(originalAngle);
-            this.yv = -this.currentSpeed * Math.cos(originalAngle);
-            
-            // Increase lifetime - this is critical!
-            this.lifeTime += dt;
+    update(dt) {
+        // Move the bullet
+        this.x += this.xv;
+        this.y += this.yv;
+
+        // Apply gradual slowdown
+        this.currentSpeed *= 0.99;
+
+        // Maintain original direction while reducing speed
+        const originalAngle = this.angle;
+        this.xv = this.currentSpeed * Math.sin(originalAngle);
+        this.yv = -this.currentSpeed * Math.cos(originalAngle);
+
+        // Increase lifetime
+        this.lifeTime += dt;
     }
 
     // Check if this bullet can damage a specific ship (prevents friendly fire)
@@ -72,8 +74,8 @@ class Bullet {
     }
     
     isOffScreen() {
-        // In multiplayer mode, check against world bounds
-        if (this.game.isMultiplayer() && this.game.worldBounds.enabled) {
+        // In multiplayer or MMO mode, check against world bounds
+        if ((this.game.isMultiplayer() || this.game.isMMO()) && this.game.worldBounds.enabled) {
             const bounds = this.game.worldBounds;
             return (
                 this.x < -this.radius ||
@@ -82,7 +84,7 @@ class Bullet {
                 this.y > bounds.height + this.radius
             );
         }
-        
+
         // In single player mode, check against canvas
         return (
             this.x < 0 ||
@@ -95,7 +97,7 @@ class Bullet {
     isExpired() {
         return (
             this.lifeTime >= this.maxLifeTime ||
-            this.currentSpeed <= 0.5 || // Adjust this threshold as needed
+            this.currentSpeed <= 0.5 ||
             this.isOffScreen()
         );
     }

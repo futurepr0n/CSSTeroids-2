@@ -30,6 +30,7 @@
             <div class="menu-buttons">
                 <button id="startGameButton" class="menu-button">BLAST OFF!</button>
                 <button id="multiplayerButton" class="menu-button">MULTIPLAYER</button>
+                <button id="mmoButton" class="menu-button">MMO WORLD</button>
                 <button id="shipOptionsButton" class="menu-button">SHIP</button>
                 <button id="browseShipsButton" class="menu-button">BROWSE SHIPS</button>
                 <button id="highScoresButton" class="menu-button">HIGH SCORES</button>
@@ -257,7 +258,53 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- MMO Persistent World Screen -->
+    <div id="mmoScreen" class="menu-screen">
+        <div class="menu-container">
+            <h2>MMO PERSISTENT WORLD</h2>
+
+            <div class="connection-status" id="mmoConnectionStatus">
+                <div class="status-indicator" id="mmoStatusIndicator"></div>
+                <span id="mmoStatusText">Connecting...</span>
+            </div>
+
+            <div class="mmo-info" style="text-align: center; margin: 15px 0; padding: 10px; background: rgba(0,255,255,0.1); border-radius: 8px;">
+                <p style="margin: 5px 0; color: #0ff;">Drop in anytime - never-ending space!</p>
+                <p style="margin: 5px 0; color: #aaa;">Max 5 players | Individual scoring | Respawn on death</p>
+            </div>
+
+            <!-- World Status -->
+            <div class="mmo-world-status" style="text-align: center; margin: 15px 0; padding: 15px; background: rgba(0,100,0,0.2); border: 1px solid #0f0; border-radius: 8px;">
+                <h3 style="margin: 0 0 10px 0; color: #0f0;">WORLD STATUS</h3>
+                <div id="mmoWorldStatus" style="color: #fff;">
+                    <span id="mmoPlayerCount">-</span> / 5 Players Online
+                </div>
+            </div>
+
+            <!-- Ship Loading Section -->
+            <div class="ship-loading-section">
+                <h3>LOAD YOUR CUSTOM SHIP (Optional)</h3>
+                <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                    <input type="text" id="mmoShipPassphraseInput" placeholder="Ship Passphrase (e.g. frozen-arrow-soaring)" maxlength="50" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; background: #333; color: #fff; flex: 1;">
+                    <button id="mmoLoadShipButton" class="menu-button">LOAD SHIP</button>
+                </div>
+                <div id="mmoLoadedShipInfo" style="display: none; padding: 10px; background: rgba(0,255,0,0.1); border-radius: 4px; font-size: 14px;">
+                    <div><strong>Loaded Ship:</strong> <span id="mmoLoadedShipName">-</span></div>
+                    <div>Lines: <span id="mmoLoadedShipLines">0</span> | Color: <span id="mmoLoadedShipColor">-</span></div>
+                </div>
+            </div>
+
+            <div class="mmo-options" style="text-align: center; margin: 20px 0;">
+                <button id="joinMMOButton" class="menu-button" style="font-size: 24px; padding: 15px 40px; background: linear-gradient(180deg, #0a0 0%, #060 100%);">JOIN WORLD</button>
+            </div>
+
+            <div class="menu-buttons">
+                <button id="backFromMMOButton" class="menu-button">BACK</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Socket.io client -->
     <script src="/socket.io/socket.io.js"></script>
     
