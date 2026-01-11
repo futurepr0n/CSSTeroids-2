@@ -627,7 +627,8 @@ class Ship {
     
     handleMovementBounds() {
         // Check game mode and apply appropriate boundary behavior
-        if (this.game.isMultiplayer()) {
+        // MMO mode also uses world bounds like multiplayer
+        if (this.game.isMultiplayer() || this.game.isMMO()) {
             this.handleBoundaryCollision();
         } else {
             this.handleScreenWrap();

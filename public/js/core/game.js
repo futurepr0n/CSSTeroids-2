@@ -77,7 +77,8 @@ class Game {
         this.lastTime = 0;
         this.accumulator = 0;
         this.timeStep = 1/60; // 60 FPS
-        
+        this._gameLoopActive = false; // Guard against multiple game loops
+
         // Input handling
         this.keys = {};
         
@@ -218,6 +219,7 @@ class Game {
         }
         
         // Start game loop
+        this._gameLoopActive = true;
         this.lastTime = performance.now() / 1000;
         requestAnimationFrame(this.gameLoop.bind(this));
     }
@@ -343,33 +345,42 @@ detectMobileDevice() {
     }
     
     gameLoop(timestamp) {
-        if (this.gameOver) return;
-        
+        if (this.gameOver) {
+            this._gameLoopActive = false;
+            return;
+        }
+
         // Convert to seconds
         const currentTime = timestamp / 1000;
         let deltaTime = currentTime - this.lastTime;
         this.lastTime = currentTime;
-        
+
+        // Validate deltaTime to prevent issues from timing bugs
+        if (isNaN(deltaTime) || deltaTime < 0 || deltaTime > 1) {
+            console.warn('🎮 GAME LOOP: Invalid deltaTime, resetting:', deltaTime);
+            deltaTime = this.timeStep;
+        }
+
         // Cap deltaTime to prevent large jumps
         if (deltaTime > 0.1) deltaTime = 0.1;
-        
+
         // Don't update if paused
         if (!this.paused) {
             this.accumulator += deltaTime;
-            
+
             // Update with fixed time step
             while (this.accumulator >= this.timeStep) {
                 this.update(this.timeStep);
                 this.accumulator -= this.timeStep;
             }
         }
-        
+
         // Update camera position
         this.updateCamera();
-        
+
         // Always render
         this.render();
-        
+
         // Continue loop
         requestAnimationFrame(this.gameLoop.bind(this));
     }
@@ -386,6 +397,12 @@ detectMobileDevice() {
     }
     
     update(dt) {
+        // MMO mode has its own update logic
+        if (this.isMMO()) {
+            this.updateMMO(dt);
+            return;
+        }
+
         // Handle ship controls
         this.handleInput();
 
@@ -395,7 +412,7 @@ detectMobileDevice() {
           } else if (this.ship) {
             this.ship.touchControlsActive = false;
           }
-        
+
         // Update ship
         if (this.ship && !this.ship.exploding) {
             this.ship.update(dt);
@@ -494,7 +511,21 @@ detectMobileDevice() {
     }
     
     handleInput() {
+        // Debug logging for MMO mode (first 5 calls only)
+        if (this.isMMO() && (!this._mmoInputLogCount || this._mmoInputLogCount < 5)) {
+            this._mmoInputLogCount = (this._mmoInputLogCount || 0) + 1;
+            console.log('🎮 MMO INPUT:', {
+                shipExists: !!this.ship,
+                shipExploding: this.ship?.exploding,
+                mmoDead: this.mmoDead,
+                shootKeyPressed: this.keys['ArrowDown'] || this.keys['s'] || this.keys[' '],
+                canShoot: this.ship?.canShoot,
+                mode: this.mode
+            });
+        }
+
         if (!this.ship || this.ship.exploding) return;
+        if (this.isMMO() && this.mmoDead) return; // Don't handle input if dead in MMO
         
         // Handle keyboard rotation - check key directly instead of using the window.touchActive flag
         // This ensures keyboard controls always work regardless of touch state
@@ -521,35 +552,40 @@ detectMobileDevice() {
         
         // Shooting
         if ((this.keys['ArrowDown'] || this.keys['s'] || this.keys[' ']) && this.ship.canShoot) {
-          const bullets = this.ship.shoot();
-          if (bullets) {
-            this.bullets = this.bullets.concat(bullets);
+          // MMO mode has special shooting handling
+          if (this.isMMO()) {
+            this.mmoShoot();
+          } else {
+            const bullets = this.ship.shoot();
+            if (bullets) {
+              this.bullets = this.bullets.concat(bullets);
 
-            // Check for enemy aggro when shooting (bullet proximity aggro system)
-            if (this.isMultiplayer() && bullets.length > 0) {
-              for (const enemy of this.enemies) {
-                if (enemy.active && enemy.checkBulletAggro) {
-                  // Check each bullet for aggro - 'main' identifies this as the local player
-                  for (const bullet of bullets) {
-                    enemy.checkBulletAggro(bullet.x, bullet.y, 'main');
+              // Check for enemy aggro when shooting (bullet proximity aggro system)
+              if (this.isMultiplayer() && bullets.length > 0) {
+                for (const enemy of this.enemies) {
+                  if (enemy.active && enemy.checkBulletAggro) {
+                    // Check each bullet for aggro - 'main' identifies this as the local player
+                    for (const bullet of bullets) {
+                      enemy.checkBulletAggro(bullet.x, bullet.y, 'main');
+                    }
                   }
                 }
               }
-            }
 
-            // Broadcast shooting action in multiplayer (deterministic approach)
-            if (this.isMultiplayer() && window.socketManager?.socket?.connected) {
-              // Send the shoot action with ship state at time of firing
-              const shootData = {
-                shipX: this.ship.x,
-                shipY: this.ship.y,
-                shipAngle: this.ship.angle,
-                shipVelocity: { x: this.ship.thrust.x, y: this.ship.thrust.y },
-                weaponPoints: this.ship.weaponPoints || [],
-                timestamp: Date.now()
-              };
-              debugLog('🔫 SENDING player-shoot:', shootData);
-              window.socketManager.socket.emit('player-shoot', shootData);
+              // Broadcast shooting action in multiplayer (deterministic approach)
+              if (this.isMultiplayer() && window.socketManager?.socket?.connected) {
+                // Send the shoot action with ship state at time of firing
+                const shootData = {
+                  shipX: this.ship.x,
+                  shipY: this.ship.y,
+                  shipAngle: this.ship.angle,
+                  shipVelocity: { x: this.ship.thrust.x, y: this.ship.thrust.y },
+                  weaponPoints: this.ship.weaponPoints || [],
+                  timestamp: Date.now()
+                };
+                debugLog('🔫 SENDING player-shoot:', shootData);
+                window.socketManager.socket.emit('player-shoot', shootData);
+              }
             }
           }
         }
@@ -561,24 +597,29 @@ detectMobileDevice() {
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         
         // Draw starfield background BEFORE camera transform
-        if (!this.isMultiplayer()) {
+        if (!this.isMultiplayer() && !this.isMMO()) {
             // Only draw starfield in single player mode
             this.drawStarfield();
         } else {
-            // Simple starfield for multiplayer (doesn't scroll with camera)
+            // Simple starfield for multiplayer/MMO (doesn't scroll with camera)
             this.drawSimpleStarfield();
         }
         
         // Apply camera transform for multiplayer
         this.applyCameraTransform();
         
-        // Draw world boundary in multiplayer mode
+        // Draw world boundary in multiplayer/MMO mode
         if (this.worldBounds.enabled) {
             this.drawWorldBoundary();
         }
-        
-        // Draw ship
-        if (this.ship) {
+
+        // Draw MMO entities if in MMO mode
+        if (this.isMMO()) {
+            this.renderMMO();
+        }
+
+        // Draw ship (skip if dead in MMO mode)
+        if (this.ship && !(this.isMMO() && this.mmoDead)) {
             // Add occasional debug logging for own ship
             if (!this.ownShipLogCount) this.ownShipLogCount = 0;
             this.ownShipLogCount++;
@@ -594,7 +635,7 @@ detectMobileDevice() {
                     isMultiplayer: this.isMultiplayer()
                 });
             }
-            
+
             this.ship.draw(this.ctx);
             if (window.DEBUG_COLLISIONS) {
                 this.ship.drawCollisionBoundaries(this.ctx);
@@ -751,46 +792,50 @@ detectMobileDevice() {
             bullet.draw(this.ctx);
         }
         
-        // Draw asteroids
-        if (this.asteroids.length > 0) {
-            debugLog('🎨 RENDER: Drawing', this.asteroids.length, 'asteroids', {
-                isHost: this.isHost,
-                isMultiplayer: this.isMultiplayer(),
-                firstAsteroidPos: this.asteroids[0] ? { x: this.asteroids[0].x, y: this.asteroids[0].y } : 'none'
-            });
-        }
-        
-        for (const asteroid of this.asteroids) {
-            try {
-                asteroid.draw(this.ctx);
-                
-                // Draw asteroid collision boundaries if debug mode is on
-                if (window.DEBUG_COLLISIONS) {
-                    this.ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
-                    this.ctx.beginPath();
-                    this.ctx.arc(asteroid.x, asteroid.y, asteroid.radius, 0, Math.PI * 2);
-                    this.ctx.stroke();
+        // Draw asteroids (skip in MMO mode - they're rendered via renderMMO)
+        if (!this.isMMO()) {
+            if (this.asteroids.length > 0) {
+                debugLog('🎨 RENDER: Drawing', this.asteroids.length, 'asteroids', {
+                    isHost: this.isHost,
+                    isMultiplayer: this.isMultiplayer(),
+                    firstAsteroidPos: this.asteroids[0] ? { x: this.asteroids[0].x, y: this.asteroids[0].y } : 'none'
+                });
+            }
+
+            for (const asteroid of this.asteroids) {
+                try {
+                    asteroid.draw(this.ctx);
+
+                    // Draw asteroid collision boundaries if debug mode is on
+                    if (window.DEBUG_COLLISIONS) {
+                        this.ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+                        this.ctx.beginPath();
+                        this.ctx.arc(asteroid.x, asteroid.y, asteroid.radius, 0, Math.PI * 2);
+                        this.ctx.stroke();
+                    }
+                } catch (error) {
+                    console.error('🎨 RENDER ERROR: Failed to draw asteroid:', error, asteroid);
                 }
-            } catch (error) {
-                console.error('🎨 RENDER ERROR: Failed to draw asteroid:', error, asteroid);
             }
         }
-        
+
         // Draw debris
         for (const particle of this.debris) {
             particle.draw(this.ctx);
         }
-        
-        // Draw enemies
-        for (const enemy of this.enemies) {
-            enemy.draw(this.ctx);
-            
-            // Draw enemy collision boundaries if debug mode is on
-            if (window.DEBUG_COLLISIONS) {
-                this.ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
-                this.ctx.beginPath();
-                this.ctx.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI * 2);
-                this.ctx.stroke();
+
+        // Draw enemies (skip in MMO mode - they're rendered via renderMMO)
+        if (!this.isMMO()) {
+            for (const enemy of this.enemies) {
+                enemy.draw(this.ctx);
+
+                // Draw enemy collision boundaries if debug mode is on
+                if (window.DEBUG_COLLISIONS) {
+                    this.ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+                    this.ctx.beginPath();
+                    this.ctx.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI * 2);
+                    this.ctx.stroke();
+                }
             }
         }
         
@@ -806,9 +851,13 @@ detectMobileDevice() {
         
         // Remove camera transform before drawing HUD
         this.removeCameraTransform();
-        
+
         // Draw HUD (not affected by camera)
-        this.drawHUD();
+        if (this.isMMO()) {
+            this.drawMMOHUD();
+        } else {
+            this.drawHUD();
+        }
         
         // Draw debug info if enabled
         if (window.DEBUG_COLLISIONS) {
@@ -1688,7 +1737,921 @@ detectMobileDevice() {
     isSinglePlayer() {
         return this.mode === 'singleplayer';
     }
-    
+
+    isMMO() {
+        return this.mode === 'mmo';
+    }
+
+    // ============================================
+    // MMO PERSISTENT WORLD METHODS
+    // ============================================
+
+    /**
+     * Start MMO game mode
+     */
+    startMMOGame(sessionId, playerData) {
+        console.log('🌍 MMO: Starting MMO game', { sessionId, playerData });
+
+        // Set mode
+        this.mode = 'mmo';
+        this.mmoSessionId = sessionId;
+        this.mmoPlayerData = playerData;
+
+        // MMO-specific state
+        this.mmoPlayers = new Map(); // Other players in the world
+        this.mmoAsteroids = new Map(); // Server-controlled asteroids
+        this.mmoEnemies = new Map(); // Server-controlled enemies
+        this.mmoBullets = []; // All bullets in the world
+        this.mmoScore = 0; // Individual score
+        this.mmoHighestScore = { score: 0, playerName: '' };
+        this.mmoLeaderboard = [];
+        this.mmoDead = false;
+        this.mmoRespawnTimer = 0;
+        this.mmoInvulnerable = false;
+        this.mmoInvulnerableTimer = 0;
+
+        // Configure world bounds
+        this.worldBounds.enabled = true;
+        this.worldBounds.width = 2000;
+        this.worldBounds.height = 1500;
+
+        // Enable camera
+        this.camera.enabled = true;
+        this.camera.followTarget = null;
+
+        // Initialize socket handlers
+        this.initializeMMOSync();
+
+        // Join the MMO session via socket
+        if (window.socketManager?.socket) {
+            window.socketManager.socket.emit('mmo-join', {
+                sessionId: sessionId,
+                playerData: playerData
+            });
+        }
+    }
+
+    /**
+     * Initialize MMO socket event handlers
+     */
+    initializeMMOSync() {
+        if (!window.socketManager?.socket) {
+            console.error('🌍 MMO: No socket available for MMO sync');
+            return;
+        }
+
+        const socket = window.socketManager.socket;
+        console.log('🌍 MMO: Initializing MMO sync handlers');
+
+        // Remove any existing MMO handlers first
+        socket.off('mmo-join-success');
+        socket.off('mmo-join-error');
+        socket.off('mmo-state');
+        socket.off('mmo-player-joined');
+        socket.off('mmo-player-left');
+        socket.off('mmo-score-update');
+        socket.off('mmo-highest-score');
+        socket.off('mmo-asteroid-spawn');
+        socket.off('mmo-asteroid-destroyed');
+        socket.off('mmo-enemy-spawn');
+        socket.off('mmo-enemy-destroyed');
+        socket.off('mmo-enemy-shoot');
+        socket.off('mmo-bullet-fired');
+        socket.off('mmo-player-died');
+        socket.off('mmo-respawn');
+        socket.off('mmo-player-respawned');
+
+        // Handle successful join
+        socket.on('mmo-join-success', (data) => {
+            console.log('🌍 MMO: Join success!', data);
+            this.playerId = data.player.id;
+            this.mmoSessionId = data.sessionId;
+
+            // Update world bounds
+            this.worldBounds.width = data.worldBounds.width;
+            this.worldBounds.height = data.worldBounds.height;
+
+            // Initialize game with MMO state
+            this.initMMOGame(data);
+        });
+
+        // Handle join error
+        socket.on('mmo-join-error', (data) => {
+            console.error('🌍 MMO: Join error:', data.error);
+            alert('Failed to join MMO world: ' + data.error);
+            if (window.gameMenu) {
+                window.gameMenu.showMainMenu();
+            }
+        });
+
+        // Handle state updates from server
+        socket.on('mmo-state', (data) => {
+            this.handleMMOStateUpdate(data);
+        });
+
+        // Handle player joined
+        socket.on('mmo-player-joined', (data) => {
+            console.log('🌍 MMO: Player joined:', data.playerName);
+            this.addMMOPlayer(data);
+        });
+
+        // Handle player left
+        socket.on('mmo-player-left', (data) => {
+            console.log('🌍 MMO: Player left:', data.playerId);
+            this.mmoPlayers.delete(data.playerId);
+        });
+
+        // Handle score updates
+        socket.on('mmo-score-update', (data) => {
+            if (data.playerId === this.playerId) {
+                this.mmoScore = data.score;
+            }
+            this.updateMMOLeaderboard();
+        });
+
+        // Handle highest score update
+        socket.on('mmo-highest-score', (data) => {
+            this.mmoHighestScore = data;
+        });
+
+        // Handle asteroid spawn
+        socket.on('mmo-asteroid-spawn', (data) => {
+            this.mmoAsteroids.set(data.id, this.createMMOAsteroid(data));
+        });
+
+        // Handle asteroid destroyed
+        socket.on('mmo-asteroid-destroyed', (data) => {
+            console.log('💥 MMO CLIENT: Received asteroid-destroyed event', data);
+            const asteroid = this.mmoAsteroids.get(data.asteroidId);
+            if (asteroid) {
+                console.log('💥 MMO CLIENT: Removing asteroid and creating debris');
+                // Create debris
+                this.createDebrisAtPosition(data.x, data.y);
+                this.mmoAsteroids.delete(data.asteroidId);
+            } else {
+                console.log('💥 MMO CLIENT: Asteroid not found in local map');
+            }
+        });
+
+        // Handle enemy spawn
+        socket.on('mmo-enemy-spawn', (data) => {
+            this.mmoEnemies.set(data.id, this.createMMOEnemy(data));
+        });
+
+        // Handle enemy destroyed
+        socket.on('mmo-enemy-destroyed', (data) => {
+            console.log('💥 MMO CLIENT: Received enemy-destroyed event', data);
+            const enemy = this.mmoEnemies.get(data.enemyId);
+            if (enemy) {
+                console.log('💥 MMO CLIENT: Removing enemy and creating debris');
+                this.createDebrisAtPosition(data.x, data.y);
+                this.mmoEnemies.delete(data.enemyId);
+            } else {
+                console.log('💥 MMO CLIENT: Enemy not found in local map');
+            }
+        });
+
+        // Handle enemy hit (not destroyed, just damaged)
+        socket.on('mmo-enemy-hit', (data) => {
+            console.log('💥 MMO CLIENT: Enemy hit!', data);
+            const enemy = this.mmoEnemies.get(data.enemyId);
+            if (enemy) {
+                // Flash the enemy to show it was hit
+                enemy.hitFlash = 0.3; // Flash duration in seconds
+                // Create small hit sparks
+                this.createHitSparks(data.x, data.y);
+            }
+        });
+
+        // Handle enemy shoot
+        socket.on('mmo-enemy-shoot', (data) => {
+            this.createMMOEnemyBullet(data);
+        });
+
+        // Handle bullet fired by other players
+        socket.on('mmo-bullet-fired', (data) => {
+            // Create visual bullet
+            if (data.playerId !== this.playerId) {
+                this.mmoBullets.push({
+                    ...data.bullet,
+                    isRemote: true
+                });
+            }
+        });
+
+        // Handle player death
+        socket.on('mmo-player-died', (data) => {
+            if (data.playerId === this.playerId) {
+                this.mmoDead = true;
+                this.mmoRespawnTimer = 3000;
+            } else {
+                // Show explosion for other player
+                this.createDebrisAtPosition(data.x, data.y);
+            }
+        });
+
+        // Handle respawn
+        socket.on('mmo-respawn', (data) => {
+            console.log('🌍 MMO: Respawning at', data);
+            this.mmoDead = false;
+            this.mmoInvulnerable = true;
+            this.mmoInvulnerableTimer = 3000;
+            this.mmoRespawnTimer = 0;
+            if (this.ship) {
+                this.ship.x = data.x;
+                this.ship.y = data.y;
+                this.ship.angle = data.angle;
+                this.ship.vx = 0;
+                this.ship.vy = 0;
+                this.ship.exploding = false;
+                this.ship.canShoot = true;
+                this.ship.shootTimer = 0;
+                this.ship.invulnerable = true;
+                this.ship.invulnerableTime = 3;
+            }
+        });
+
+        // Handle other player respawn
+        socket.on('mmo-player-respawned', (data) => {
+            const player = this.mmoPlayers.get(data.playerId);
+            if (player && player.ship) {
+                player.ship.x = data.x;
+                player.ship.y = data.y;
+                player.dead = false;
+            }
+        });
+
+        // Start sending position updates
+        this.mmoUpdateInterval = setInterval(() => {
+            this.sendMMOPlayerUpdate();
+        }, 50); // 20 FPS update rate
+    }
+
+    /**
+     * Initialize MMO game with initial state
+     */
+    initMMOGame(data) {
+        console.log('🌍 MMO: Initializing game with state', data);
+
+        // Reset game state
+        this.gameOver = false;
+        this.paused = false;
+        this.demoMode = false;
+        this.mmoScore = 0;
+        this._mmoInputLogCount = 0; // Reset debug log counter
+
+        // Create local ship
+        const spawnX = data.player.x;
+        const spawnY = data.player.y;
+        this.ship = new Ship(spawnX, spawnY, this);
+        this.ship.playerId = this.playerId;
+        this.ship.playerName = data.player.name;
+
+        // Ensure ship is in valid state for MMO (explicitly reset key flags)
+        this.ship.exploding = false;
+        this.ship.canShoot = true;
+        this.ship.visible = true;
+        this.ship.alive = true;
+
+        console.log('🌍 MMO: Ship created', {
+            x: this.ship.x,
+            y: this.ship.y,
+            canShoot: this.ship.canShoot,
+            exploding: this.ship.exploding,
+            playerId: this.ship.playerId
+        });
+
+        // Apply ship customization if available
+        if (this.mmoPlayerData?.shipData) {
+            const shipData = this.mmoPlayerData.shipData;
+            this.ship.shipType = 'custom';
+            this.ship.customLines = shipData.customLines || [];
+            this.ship.color = shipData.color || 'white';
+            this.ship.thrusterColor = shipData.thrusterColor || 'blue';
+            this.ship.thrusterPoints = shipData.thrusterPoints || [];
+            this.ship.weaponPoints = shipData.weaponPoints || [];
+            this.ship.playerName = shipData.name || this.ship.playerName;
+            console.log('🌍 MMO: Applied ship customization', {
+                type: this.ship.shipType,
+                customLinesCount: this.ship.customLines.length,
+                color: this.ship.color
+            });
+        }
+
+        // Set camera to follow ship
+        this.camera.followTarget = this.ship;
+
+        // Load initial asteroids
+        this.mmoAsteroids.clear();
+        data.asteroids.forEach(ast => {
+            this.mmoAsteroids.set(ast.id, this.createMMOAsteroid(ast));
+        });
+
+        // Load initial enemies
+        this.mmoEnemies.clear();
+        data.enemies.forEach(enemy => {
+            this.mmoEnemies.set(enemy.id, this.createMMOEnemy(enemy));
+        });
+
+        // Load other players
+        this.mmoPlayers.clear();
+        data.players.forEach(player => {
+            if (player.id !== this.playerId) {
+                this.addMMOPlayer(player);
+            }
+        });
+
+        // Set highest score
+        this.mmoHighestScore = data.highestScore;
+
+        // Clear bullets and debris
+        this.mmoBullets = [];
+        this.bullets = [];
+        this.debris = [];
+
+        // Re-initialize touch controls for the new ship
+        if (this.isMobileDevice) {
+            this.initTouchControls();
+        }
+
+        // Stop any existing game loop by temporarily setting gameOver, then restart
+        // This prevents multiple concurrent game loops
+        if (this._gameLoopActive) {
+            console.log('🌍 MMO: Stopping existing game loop before starting new one');
+            this.gameOver = true; // Will cause current loop to exit on next iteration
+        }
+
+        // Reset accumulator to prevent time accumulation issues
+        this.accumulator = 0;
+
+        // Small delay to allow any existing loop to exit, then start fresh
+        setTimeout(() => {
+            this.gameOver = false;
+            this._gameLoopActive = true;
+            this.lastTime = performance.now() / 1000;
+            requestAnimationFrame(this.gameLoop.bind(this));
+
+            console.log('🌍 MMO: Game initialized and running', {
+                shipExists: !!this.ship,
+                shipCanShoot: this.ship?.canShoot,
+                mmoDead: this.mmoDead,
+                mmoInvulnerable: this.mmoInvulnerable,
+                mode: this.mode
+            });
+        }, 50); // 50ms delay to allow existing loop to exit
+    }
+
+    /**
+     * Create MMO asteroid from server data
+     */
+    createMMOAsteroid(data) {
+        const asteroid = new Asteroid(data.x, data.y, data.size || 2, this);
+        asteroid.id = data.id;
+        asteroid.vx = data.vx || 0;
+        asteroid.vy = data.vy || 0;
+        asteroid.rotation = data.rotation || 0;
+        asteroid.rotationSpeed = data.rotationSpeed || 0;
+        asteroid.radius = data.radius || 30;
+        asteroid.seed = data.seed || Math.random() * 10000;
+        return asteroid;
+    }
+
+    /**
+     * Create MMO enemy from server data
+     */
+    createMMOEnemy(data) {
+        const enemy = new Enemy(data.x, data.y, this);
+        enemy.id = data.id;
+        // Server uses math angle (0=right), convert to game angle (0=up)
+        enemy.angle = (data.angle || 0) + Math.PI / 2;
+        enemy.health = data.health || 3;
+        return enemy;
+    }
+
+    /**
+     * Create bullet from MMO enemy
+     */
+    createMMOEnemyBullet(data) {
+        // Server uses math angle convention (0=right), Bullet expects game convention (0=up)
+        // Convert: gameAngle = mathAngle + π/2
+        const gameAngle = data.angle + Math.PI / 2;
+
+        // Bullet constructor: (x, y, angle, shipXv, shipYv, game, source, weaponCount, ownerId)
+        const bullet = new Bullet(data.x, data.y, gameAngle, 0, 0, this, 'enemy', 1, data.enemyId);
+        bullet.isEnemyBullet = true;
+        bullet.color = 'red';
+        this.bullets.push(bullet);
+    }
+
+    /**
+     * Add MMO player to the game
+     */
+    addMMOPlayer(playerData) {
+        const ship = new Ship(playerData.x, playerData.y, this);
+        ship.playerId = playerData.playerId || playerData.id;
+        ship.playerName = playerData.playerName || playerData.name || 'Unknown';
+        ship.angle = playerData.angle || 0;
+
+        // Apply ship customization if available
+        if (playerData.shipData) {
+            ship.applyCustomization(playerData.shipData);
+        }
+
+        this.mmoPlayers.set(ship.playerId, {
+            ship: ship,
+            lastUpdate: Date.now(),
+            dead: playerData.dead || false
+        });
+    }
+
+    /**
+     * Handle MMO state update from server
+     */
+    handleMMOStateUpdate(data) {
+        // Update asteroids
+        data.asteroids.forEach(astData => {
+            let asteroid = this.mmoAsteroids.get(astData.id);
+            if (asteroid) {
+                asteroid.x = astData.x;
+                asteroid.y = astData.y;
+                asteroid.vx = astData.vx;
+                asteroid.vy = astData.vy;
+                asteroid.rotation = astData.rotation;
+            } else {
+                this.mmoAsteroids.set(astData.id, this.createMMOAsteroid(astData));
+            }
+        });
+
+        // Remove asteroids not in update
+        const serverAsteroidIds = new Set(data.asteroids.map(a => a.id));
+        for (const [id] of this.mmoAsteroids) {
+            if (!serverAsteroidIds.has(id)) {
+                this.mmoAsteroids.delete(id);
+            }
+        }
+
+        // Update enemies
+        data.enemies.forEach(enemyData => {
+            let enemy = this.mmoEnemies.get(enemyData.id);
+            if (enemy) {
+                enemy.x = enemyData.x;
+                enemy.y = enemyData.y;
+                // Server uses math angle (0=right), convert to game angle (0=up)
+                enemy.angle = (enemyData.angle || 0) + Math.PI / 2;
+                enemy.health = enemyData.health;
+            } else {
+                this.mmoEnemies.set(enemyData.id, this.createMMOEnemy(enemyData));
+            }
+        });
+
+        // Remove enemies not in update
+        const serverEnemyIds = new Set(data.enemies.map(e => e.id));
+        for (const [id] of this.mmoEnemies) {
+            if (!serverEnemyIds.has(id)) {
+                this.mmoEnemies.delete(id);
+            }
+        }
+
+        // Update other players
+        data.players.forEach(playerData => {
+            if (playerData.id === this.playerId) return;
+
+            let playerEntry = this.mmoPlayers.get(playerData.id);
+            if (playerEntry) {
+                playerEntry.ship.x = playerData.x;
+                playerEntry.ship.y = playerData.y;
+                playerEntry.ship.angle = playerData.angle;
+                playerEntry.dead = playerData.dead;
+                playerEntry.lastUpdate = Date.now();
+            } else {
+                this.addMMOPlayer(playerData);
+            }
+        });
+
+        // Remove players not in update
+        const serverPlayerIds = new Set(data.players.map(p => p.id));
+        for (const [id] of this.mmoPlayers) {
+            if (!serverPlayerIds.has(id)) {
+                this.mmoPlayers.delete(id);
+            }
+        }
+
+        // Update leaderboard from player scores
+        this.mmoLeaderboard = data.players
+            .map(p => ({ id: p.id, name: p.name, score: p.score }))
+            .sort((a, b) => b.score - a.score);
+    }
+
+    /**
+     * Send player position update to server
+     */
+    sendMMOPlayerUpdate() {
+        if (!this.isMMO() || !this.ship || this.mmoDead) return;
+
+        if (window.socketManager?.socket) {
+            window.socketManager.socket.emit('mmo-player-update', {
+                x: this.ship.x,
+                y: this.ship.y,
+                angle: this.ship.angle,
+                vx: this.ship.vx,
+                vy: this.ship.vy
+            });
+        }
+    }
+
+    /**
+     * Update leaderboard
+     */
+    updateMMOLeaderboard() {
+        // Leaderboard is updated via mmo-state events
+    }
+
+    /**
+     * Handle shooting in MMO mode
+     */
+    mmoShoot() {
+        // Only block shooting when dead, allow shooting while invulnerable
+        if (this.mmoDead) {
+            return;
+        }
+
+        if (!this.ship || this.ship.exploding) {
+            return;
+        }
+
+        // Create local bullets for immediate feedback
+        const bullets = this.ship.shoot();
+        console.log('🔫 MMO: ship.shoot() returned', bullets?.length, 'bullets');
+        if (bullets && bullets.length > 0) {
+            this.bullets = this.bullets.concat(bullets);
+
+            // Send shoot event to server (use first bullet position)
+            if (window.socketManager?.socket) {
+                window.socketManager.socket.emit('mmo-shoot', {
+                    x: bullets[0].x,
+                    y: bullets[0].y,
+                    angle: this.ship.angle
+                });
+            }
+        }
+    }
+
+    /**
+     * Handle player death in MMO
+     */
+    mmoPlayerDied() {
+        if (this.mmoDead) return;
+
+        this.mmoDead = true;
+        this.ship.exploding = true;
+        this.createDebrisAtPosition(this.ship.x, this.ship.y);
+
+        if (window.socketManager?.socket) {
+            window.socketManager.socket.emit('mmo-player-died', {
+                x: this.ship.x,
+                y: this.ship.y
+            });
+        }
+    }
+
+    /**
+     * Leave MMO session
+     */
+    leaveMMOSession() {
+        if (this.mmoUpdateInterval) {
+            clearInterval(this.mmoUpdateInterval);
+            this.mmoUpdateInterval = null;
+        }
+
+        if (window.socketManager?.socket) {
+            window.socketManager.socket.emit('mmo-leave');
+        }
+
+        this.mode = 'singleplayer';
+        this.mmoSessionId = null;
+        this.mmoPlayers.clear();
+        this.mmoAsteroids.clear();
+        this.mmoEnemies.clear();
+    }
+
+    /**
+     * Draw MMO HUD
+     */
+    drawMMOHUD() {
+        if (this.demoMode) return;
+
+        this.ctx.save();
+
+        // MMO indicator
+        this.ctx.fillStyle = '#0ff';
+        this.ctx.font = 'bold 16px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('MMO WORLD', this.canvas.width / 2, 30);
+
+        // Your score (top right)
+        this.ctx.fillStyle = 'white';
+        this.ctx.font = '18px Arial';
+        this.ctx.textAlign = 'right';
+        this.ctx.fillText(`Your Score: ${this.mmoScore}`, this.canvas.width - 20, 30);
+
+        // Highest active score (yellow)
+        this.ctx.fillStyle = '#ff0';
+        this.ctx.fillText(`Highest: ${this.mmoHighestScore.score} (${this.mmoHighestScore.playerName || '-'})`, this.canvas.width - 20, 55);
+
+        // Player count
+        this.ctx.fillStyle = '#aaa';
+        this.ctx.font = '14px Arial';
+        const playerCount = this.mmoPlayers.size + 1;
+        this.ctx.fillText(`Players: ${playerCount}/5`, this.canvas.width - 20, 75);
+
+        // Leaderboard (top left)
+        this.drawMMOLeaderboard();
+
+        // Dead/Respawn message
+        if (this.mmoDead) {
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            this.ctx.fillRect(this.canvas.width / 2 - 150, this.canvas.height / 2 - 40, 300, 80);
+
+            this.ctx.fillStyle = 'red';
+            this.ctx.font = 'bold 24px Arial';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText('DESTROYED', this.canvas.width / 2, this.canvas.height / 2);
+
+            this.ctx.fillStyle = 'white';
+            this.ctx.font = '16px Arial';
+            const respawnSecs = Math.ceil(this.mmoRespawnTimer / 1000);
+            this.ctx.fillText(`Respawning in ${respawnSecs}...`, this.canvas.width / 2, this.canvas.height / 2 + 25);
+        }
+
+        // Invulnerability indicator
+        if (this.mmoInvulnerable) {
+            this.ctx.fillStyle = 'rgba(0, 255, 255, 0.3)';
+            this.ctx.font = '14px Arial';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText('INVULNERABLE', this.canvas.width / 2, this.canvas.height - 30);
+        }
+
+        this.ctx.restore();
+    }
+
+    /**
+     * Draw MMO leaderboard
+     */
+    drawMMOLeaderboard() {
+        if (!this.mmoLeaderboard || this.mmoLeaderboard.length === 0) return;
+
+        const x = 10;
+        const y = 50;
+        const width = 180;
+        const height = 20 + this.mmoLeaderboard.slice(0, 5).length * 20;
+
+        // Background
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        this.ctx.fillRect(x, y, width, height);
+
+        // Title
+        this.ctx.fillStyle = '#ff0';
+        this.ctx.font = 'bold 14px Arial';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText('LEADERBOARD', x + 10, y + 18);
+
+        // Players
+        this.ctx.font = '12px Arial';
+        let rowY = y + 38;
+
+        this.mmoLeaderboard.slice(0, 5).forEach((player, index) => {
+            const isMe = player.id === this.playerId;
+            this.ctx.fillStyle = isMe ? '#0ff' : 'white';
+            this.ctx.fillText(`${index + 1}. ${player.name}: ${player.score}`, x + 10, rowY);
+            rowY += 18;
+        });
+    }
+
+    /**
+     * Update game state in MMO mode
+     */
+    updateMMO(dt) {
+        // Handle input (controls)
+        this.handleInput();
+
+        // Touch controls
+        if (this.ship && this.touchControls && this.touchControls.isActive()) {
+            this.ship.touchControlsActive = true;
+        } else if (this.ship) {
+            this.ship.touchControlsActive = false;
+        }
+
+        // Update respawn timer
+        if (this.mmoDead && this.mmoRespawnTimer > 0) {
+            this.mmoRespawnTimer -= dt * 1000;
+        }
+
+        // Update invulnerability timer
+        if (this.mmoInvulnerable && this.mmoInvulnerableTimer > 0) {
+            this.mmoInvulnerableTimer -= dt * 1000;
+            if (this.mmoInvulnerableTimer <= 0) {
+                this.mmoInvulnerable = false;
+            }
+        }
+
+        // Update ship if not dead
+        if (this.ship && !this.mmoDead && !this.ship.exploding) {
+            this.ship.update(dt);
+
+            // Touch controls
+            if (window.updateTouchControls && this.touchControls && this.touchControls.isActive()) {
+                window.updateTouchControls.call(this);
+            }
+        }
+
+        // Update local bullets
+        for (let i = this.bullets.length - 1; i >= 0; i--) {
+            this.bullets[i].update(dt);
+            if (this.bullets[i].isExpired()) {
+                this.bullets.splice(i, 1);
+            }
+        }
+
+        // Update debris
+        for (let i = this.debris.length - 1; i >= 0; i--) {
+            this.debris[i].update(dt);
+            if (this.debris[i].lifeTime <= 0) {
+                this.debris.splice(i, 1);
+            }
+        }
+
+        // Check local collisions (client-side prediction for immediate feedback)
+        // Always check collisions - bullet vs enemy/asteroid should work even when player is invulnerable
+        if (!this.mmoDead && this.ship) {
+            this.checkMMOCollisions();
+        }
+    }
+
+    /**
+     * Check collisions in MMO mode - using same logic as single player
+     */
+    checkMMOCollisions() {
+        if (!this.ship || this.mmoDead || this.ship.exploding) return;
+
+        // Check ship-asteroid collisions using proper ship collision detection
+        if (!this.ship.invulnerable && !this.mmoInvulnerable) {
+            for (const [asteroidId, asteroid] of this.mmoAsteroids) {
+                // Use the ship's enhanced collision detection (checks ship lines)
+                if (this.ship.checkCollision(asteroid)) {
+                    console.log('💥 MMO: Ship-asteroid collision!', asteroidId);
+                    if (window.socketManager?.socket) {
+                        window.socketManager.socket.emit('mmo-ship-collision', {
+                            type: 'asteroid',
+                            objectId: asteroidId,
+                            x: asteroid.x,
+                            y: asteroid.y
+                        });
+                    }
+                    this.mmoPlayerDied();
+                    return;
+                }
+            }
+
+            // Check ship-enemy collisions using proper ship collision detection
+            for (const [enemyId, enemy] of this.mmoEnemies) {
+                if (this.ship.checkCollision(enemy)) {
+                    console.log('💥 MMO: Ship-enemy collision!', enemyId);
+                    if (window.socketManager?.socket) {
+                        window.socketManager.socket.emit('mmo-ship-collision', {
+                            type: 'enemy',
+                            objectId: enemyId,
+                            x: enemy.x,
+                            y: enemy.y
+                        });
+                    }
+                    this.mmoPlayerDied();
+                    return;
+                }
+            }
+
+            // Check ship-enemy bullet collisions using proper ship collision detection
+            for (let i = this.bullets.length - 1; i >= 0; i--) {
+                const bullet = this.bullets[i];
+                if (bullet.isEnemyBullet || bullet.source === 'enemy') {
+                    if (this.ship.checkCollision(bullet)) {
+                        console.log('💥 MMO: Enemy bullet hit player ship!');
+                        this.bullets.splice(i, 1);
+                        this.mmoPlayerDied();
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Check PLAYER bullet collisions with asteroids and enemies (CLIENT-SIDE)
+        // Debug: log bullet count periodically
+        if (this.bullets.length > 0 && !this._bulletDebugThrottle) {
+            this._bulletDebugThrottle = true;
+            console.log('🔫 MMO Collision Check:', this.bullets.length, 'bullets,', this.mmoAsteroids.size, 'asteroids,', this.mmoEnemies.size, 'enemies');
+            setTimeout(() => { this._bulletDebugThrottle = false; }, 500);
+        }
+
+        for (let i = this.bullets.length - 1; i >= 0; i--) {
+            const bullet = this.bullets[i];
+            if (bullet.isEnemyBullet || bullet.source === 'enemy') continue;
+
+            let bulletDestroyed = false;
+
+            // Check bullet-asteroid collisions
+            for (const [asteroidId, asteroid] of this.mmoAsteroids) {
+                const dx = bullet.x - asteroid.x;
+                const dy = bullet.y - asteroid.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const collisionDist = bullet.radius + asteroid.radius;
+
+                if (dist < collisionDist) {
+                    console.log('💥 MMO: Player bullet hit asteroid!', asteroidId, 'dist:', dist, 'needed <', collisionDist);
+                    this.bullets.splice(i, 1);
+                    bulletDestroyed = true;
+
+                    // Tell server to destroy asteroid and award points
+                    if (window.socketManager?.socket) {
+                        window.socketManager.socket.emit('mmo-bullet-hit', {
+                            type: 'asteroid',
+                            objectId: asteroidId,
+                            x: asteroid.x,
+                            y: asteroid.y
+                        });
+                    }
+
+                    // Create debris locally for immediate feedback
+                    this.createDebrisAtPosition(asteroid.x, asteroid.y);
+                    this.mmoAsteroids.delete(asteroidId);
+                    break;
+                }
+            }
+
+            if (bulletDestroyed) continue;
+
+            // Check bullet-enemy collisions
+            for (const [enemyId, enemy] of this.mmoEnemies) {
+                const dx = bullet.x - enemy.x;
+                const dy = bullet.y - enemy.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const collisionDist = bullet.radius + (enemy.radius || 20);
+
+                // Debug: log near misses
+                if (dist < 100 && !enemy._nearMissLogged) {
+                    console.log('🎯 Near enemy:', enemyId, 'bullet at', bullet.x.toFixed(0), bullet.y.toFixed(0),
+                        'enemy at', enemy.x.toFixed(0), enemy.y.toFixed(0), 'dist:', dist.toFixed(0), 'need <', collisionDist.toFixed(0));
+                    enemy._nearMissLogged = true;
+                    setTimeout(() => { enemy._nearMissLogged = false; }, 1000);
+                }
+
+                if (dist < collisionDist) {
+                    console.log('💥 MMO: Player bullet hit enemy!', enemyId);
+                    this.bullets.splice(i, 1);
+
+                    // Tell server to damage/destroy enemy and award points
+                    if (window.socketManager?.socket) {
+                        window.socketManager.socket.emit('mmo-bullet-hit', {
+                            type: 'enemy',
+                            objectId: enemyId,
+                            x: enemy.x,
+                            y: enemy.y
+                        });
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * Render MMO-specific entities
+     */
+    renderMMO() {
+        // Draw MMO asteroids
+        for (const [, asteroid] of this.mmoAsteroids) {
+            asteroid.draw(this.ctx);
+        }
+
+        // Draw MMO enemies
+        for (const [, enemy] of this.mmoEnemies) {
+            enemy.draw(this.ctx);
+        }
+
+        // Draw other MMO players
+        for (const [playerId, playerData] of this.mmoPlayers) {
+            if (!playerData.dead && playerData.ship) {
+                playerData.ship.draw(this.ctx);
+
+                // Draw player name above ship
+                this.ctx.save();
+                this.ctx.fillStyle = '#aaa';
+                this.ctx.font = '12px Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText(playerData.ship.playerName || 'Player', playerData.ship.x, playerData.ship.y - 25);
+                this.ctx.restore();
+            }
+        }
+    }
+
     getWorldBounds() {
         return this.worldBounds;
     }
@@ -4231,6 +5194,25 @@ detectMobileDevice() {
                 this
             );
             debris.color = i % 2 === 0 ? 'orange' : 'red';
+            this.debris.push(debris);
+        }
+    }
+
+    createHitSparks(x, y) {
+        if (!isFinite(x) || !isFinite(y)) return;
+
+        // Create fewer, smaller particles for hit feedback
+        const numParticles = 8;
+        for (let i = 0; i < numParticles; i++) {
+            const debris = new Debris(
+                x,
+                y,
+                Math.random() * Math.PI * 2,
+                this
+            );
+            debris.color = i % 2 === 0 ? 'yellow' : 'white';
+            debris.lifeSpan = 0.3; // Shorter lifespan
+            debris.speed = 2; // Faster initial speed
             this.debris.push(debris);
         }
     }

@@ -10,10 +10,12 @@ class GameMenu {
         this.highScoresScreen = document.getElementById('highScoresScreen');
         this.gameOverHighScoreScreen = document.getElementById('gameOverHighScoreScreen');
         this.shipGalleryScreen = document.getElementById('shipGalleryScreen');
+        this.mmoScreen = document.getElementById('mmoScreen');
 
         // Buttons
         this.startGameButton = document.getElementById('startGameButton');
         this.multiplayerButton = document.getElementById('multiplayerButton');
+        this.mmoButton = document.getElementById('mmoButton');
         this.shipOptionsButton = document.getElementById('shipOptionsButton');
         this.browseShipsButton = document.getElementById('browseShipsButton');
         this.highScoresButton = document.getElementById('highScoresButton');
@@ -22,6 +24,10 @@ class GameMenu {
         this.returnToMenuButton = document.getElementById('returnToMenuButton');
         this.submitScoreButton = document.getElementById('submitScoreButton');
         this.playAgainButton = document.getElementById('playAgainButton');
+
+        // MMO elements
+        this.mmoSessionsList = document.getElementById('mmoSessionsList');
+        this.mmoShipData = null; // Loaded ship data for MMO
 
         // Gallery elements
         this.galleryPrevButton = document.getElementById('galleryPrevButton');
@@ -65,7 +71,15 @@ class GameMenu {
                 }
             });
         }
-        
+
+        // MMO button handler
+        if (this.mmoButton) {
+            this.mmoButton.addEventListener('click', () => {
+                console.log('MMO button clicked');
+                this.showMMOScreen();
+            });
+        }
+
         if (this.shipOptionsButton) {
             this.shipOptionsButton.addEventListener('click', () => {
                 // Redirect to the ship customization page
@@ -210,6 +224,7 @@ class GameMenu {
         if (this.highScoresScreen) this.highScoresScreen.style.display = 'none';
         if (this.gameOverHighScoreScreen) this.gameOverHighScoreScreen.style.display = 'none';
         if (this.shipGalleryScreen) this.shipGalleryScreen.style.display = 'none';
+        if (this.mmoScreen) this.mmoScreen.style.display = 'none';
 
         // Hide multiplayer screen if it exists
         const multiplayerScreen = document.getElementById('multiplayerScreen');
@@ -849,5 +864,211 @@ customizeGalleryShip() {
 
     // Navigate to ship customizer with passphrase
     window.location.href = 'ship-customization.html?passphrase=' + encodeURIComponent(ship.passphrase);
+}
+
+// ============================================
+// MMO PERSISTENT WORLD METHODS
+// ============================================
+
+/**
+ * Shows the MMO lobby screen
+ */
+async showMMOScreen() {
+    this.hideAllScreens();
+
+    // Hide the game canvas when showing menus
+    const gameCanvas = document.getElementById('gameCanvas');
+    if (gameCanvas) gameCanvas.style.display = 'none';
+
+    // Show the MMO screen
+    if (this.mmoScreen) {
+        this.mmoScreen.style.display = 'flex';
+    }
+
+    // Initialize socket if needed
+    if (window.socketManager && !window.socketManager.isConnected) {
+        window.socketManager.initialize();
+    }
+
+    // Update connection status
+    this.updateMMOConnectionStatus();
+
+    // Setup MMO screen event listeners (only once)
+    if (!this.mmoEventsInitialized) {
+        this.initMMOEventListeners();
+        this.mmoEventsInitialized = true;
+    }
+
+    // Fetch world status
+    await this.refreshMMOWorldStatus();
+}
+
+/**
+ * Initialize MMO screen event listeners
+ */
+initMMOEventListeners() {
+    // Join world button
+    const joinBtn = document.getElementById('joinMMOButton');
+    if (joinBtn) {
+        joinBtn.addEventListener('click', () => this.joinMMOWorld());
+    }
+
+    // Back button
+    const backBtn = document.getElementById('backFromMMOButton');
+    if (backBtn) {
+        backBtn.addEventListener('click', () => this.showMainMenu());
+    }
+
+    // Load ship button
+    const loadShipBtn = document.getElementById('mmoLoadShipButton');
+    if (loadShipBtn) {
+        loadShipBtn.addEventListener('click', () => this.loadMMOShip());
+    }
+
+    // Socket connection status
+    if (window.socketManager) {
+        window.socketManager.onConnectionChange((connected) => {
+            this.updateMMOConnectionStatus();
+        });
+    }
+}
+
+/**
+ * Update MMO connection status indicator
+ */
+updateMMOConnectionStatus() {
+    const indicator = document.getElementById('mmoStatusIndicator');
+    const text = document.getElementById('mmoStatusText');
+
+    if (window.socketManager?.isConnected) {
+        if (indicator) indicator.className = 'status-indicator connected';
+        if (text) text.textContent = 'Connected';
+    } else {
+        if (indicator) indicator.className = 'status-indicator disconnected';
+        if (text) text.textContent = 'Disconnected';
+    }
+}
+
+/**
+ * Refresh MMO world status (single persistent world)
+ */
+async refreshMMOWorldStatus() {
+    const playerCountSpan = document.getElementById('mmoPlayerCount');
+    const joinBtn = document.getElementById('joinMMOButton');
+
+    try {
+        const response = await fetch('/api/mmo-world');
+        if (!response.ok) throw new Error('Failed to fetch world status');
+
+        const data = await response.json();
+        const world = data.world;
+
+        if (playerCountSpan) {
+            playerCountSpan.textContent = world.playerCount;
+        }
+
+        // Update join button state
+        if (joinBtn) {
+            if (world.playerCount >= world.maxPlayers) {
+                joinBtn.disabled = true;
+                joinBtn.textContent = 'WORLD FULL';
+                joinBtn.style.background = '#666';
+            } else {
+                joinBtn.disabled = false;
+                joinBtn.textContent = 'JOIN WORLD';
+                joinBtn.style.background = 'linear-gradient(180deg, #0a0 0%, #060 100%)';
+            }
+        }
+
+    } catch (error) {
+        console.error('Failed to fetch MMO world status:', error);
+        if (playerCountSpan) playerCountSpan.textContent = '?';
+    }
+}
+
+/**
+ * Join the persistent MMO world
+ */
+async joinMMOWorld() {
+    if (!window.socketManager?.isConnected) {
+        alert('Not connected to server. Please wait and try again.');
+        return;
+    }
+
+    console.log('Joining MMO world...');
+
+    // Get player name
+    const playerName = localStorage.getItem('playerName') || 'Anonymous';
+
+    // Get ship data
+    let shipData = this.mmoShipData;
+    if (!shipData) {
+        // Try to load from localStorage
+        const saved = localStorage.getItem('asteroids_playerSettings');
+        if (saved) {
+            shipData = JSON.parse(saved);
+        }
+    }
+
+    // Hide menu and start game in MMO mode
+    this.hideAllScreens();
+
+    // Start game in MMO mode (single world - no session ID needed)
+    this.game.startMMOGame('mmo_world', {
+        name: playerName,
+        shipData: shipData
+    });
+}
+
+/**
+ * Load ship for MMO by passphrase
+ */
+async loadMMOShip() {
+    const input = document.getElementById('mmoShipPassphraseInput');
+    const infoDiv = document.getElementById('mmoLoadedShipInfo');
+    const nameSpan = document.getElementById('mmoLoadedShipName');
+    const linesSpan = document.getElementById('mmoLoadedShipLines');
+    const colorSpan = document.getElementById('mmoLoadedShipColor');
+
+    if (!input || !input.value.trim()) {
+        alert('Please enter a ship passphrase');
+        return;
+    }
+
+    const passphrase = input.value.trim();
+
+    try {
+        const response = await fetch(`/api/ships/passphrase/${encodeURIComponent(passphrase)}`);
+        if (!response.ok) throw new Error('Ship not found');
+
+        const ship = await response.json();
+
+        // Store the ship data
+        this.mmoShipData = {
+            shipType: 'custom',
+            shipColor: ship.color || 'white',
+            customLines: ship.customLines || [],
+            thrusterPoints: ship.thrusterPoints || [],
+            weaponPoints: ship.weaponPoints || [],
+            shipName: ship.name || 'Custom Ship',
+            passphrase: ship.passphrase
+        };
+
+        // Also save to localStorage for game to use
+        localStorage.setItem('asteroids_playerSettings', JSON.stringify(this.mmoShipData));
+
+        // Update UI
+        if (infoDiv) infoDiv.style.display = 'block';
+        if (nameSpan) nameSpan.textContent = ship.name || 'Custom Ship';
+        if (linesSpan) linesSpan.textContent = (ship.customLines || []).length;
+        if (colorSpan) colorSpan.textContent = ship.color || 'white';
+
+        console.log('Loaded ship for MMO:', ship.name);
+
+    } catch (error) {
+        console.error('Failed to load ship:', error);
+        alert('Ship not found. Please check the passphrase.');
+        if (infoDiv) infoDiv.style.display = 'none';
+    }
 }
 }
