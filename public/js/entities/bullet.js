@@ -11,7 +11,7 @@ class Bullet {
         this.ownerId = ownerId; // ID of the player who fired this bullet (for multiplayer)
 
         // Use slightly higher speed for MMO/multiplayer but not too much
-        const isLargeWorld = game.isMultiplayer?.() || game.isMMO?.();
+        const isLargeWorld = game.isMMO?.();
         const baseSpeed = isLargeWorld ? 8 : 6;
 
         // If firing from multiple weapon points, reduce range
@@ -56,26 +56,13 @@ class Bullet {
         if (this.game.isSinglePlayer()) {
             return false;
         }
-        
-        // In multiplayer mode, prevent friendly fire
-        if (this.game.isMultiplayer()) {
-            // Player bullets can't damage ships owned by the same player
-            if (this.source === 'player' && ship.playerId === this.ownerId) {
-                return false;
-            }
-            
-            // Player bullets can't damage other player ships (friendly fire protection)
-            if (this.source === 'player' && ship.isPlayerShip) {
-                return false;
-            }
-        }
-        
+
         return true;
     }
     
     isOffScreen() {
-        // In multiplayer or MMO mode, check against world bounds
-        if ((this.game.isMultiplayer() || this.game.isMMO()) && this.game.worldBounds.enabled) {
+        // In MMO/co-op worlds, check against world bounds
+        if (this.game.isMMO() && this.game.worldBounds.enabled) {
             const bounds = this.game.worldBounds;
             return (
                 this.x < -this.radius ||
