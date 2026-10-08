@@ -1,6 +1,18 @@
 // public/js/entities/asteroid.js
 class Asteroid {
-    constructor(x, y, size, game) {
+    // mulberry32: same seed -> same sequence on every client
+    static seededRandom(seed) {
+        let a = seed >>> 0;
+        return () => {
+            a = (a + 0x6D2B79F5) >>> 0;
+            let t = a;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+
+    constructor(x, y, size, game, seed) {
         this.x = x;
         this.y = y;
         this.game = game;
@@ -24,14 +36,18 @@ class Asteroid {
         this.xv = Math.cos(angle) * this.speed;
         this.yv = Math.sin(angle) * this.speed;
         
-        // Create a unique but consistent shape for this asteroid
-        this.vertices = Math.floor(Math.random() * 3) + 6; // 6-8 vertices
-        this.jaggedness = Math.random() * 0.2 + 0.1;
-        
-        // Pre-calculate vertex distances for consistent shape
+        this.rotation = 0;
+        this.buildShape(seed === undefined ? Math.random : Asteroid.seededRandom(seed));
+        if (seed !== undefined) this.seed = seed;
+    }
+
+    // Shape comes from rand so seeded asteroids look identical on every client
+    buildShape(rand) {
+        this.vertices = Math.floor(rand() * 3) + 6; // 6-8 vertices
+        this.jaggedness = rand() * 0.2 + 0.1;
         this.offsets = [];
         for (let i = 0; i < this.vertices; i++) {
-            this.offsets.push(this.radius * (1 - this.jaggedness + Math.random() * this.jaggedness));
+            this.offsets.push(this.radius * (1 - this.jaggedness + rand() * this.jaggedness));
         }
     }
     
@@ -149,7 +165,7 @@ class Asteroid {
         
         for (let i = 0; i < this.vertices; i++) {
             // Calculate position around the circumference
-            const angle = i * Math.PI * 2 / this.vertices;
+            const angle = i * Math.PI * 2 / this.vertices + (this.rotation || 0);
             const radius = this.offsets[i];
             
             const x = this.x + radius * Math.cos(angle);

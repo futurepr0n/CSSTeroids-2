@@ -1760,6 +1760,7 @@ detectMobileDevice() {
         // MMO-specific state
         this.mmoPlayers = new Map(); // Other players in the world
         this.mmoAsteroids = new Map(); // Server-controlled asteroids
+        this.mmoPendingDestroy = new Map(); // asteroidId -> time hit locally, awaiting server
         this.mmoEnemies = new Map(); // Server-controlled enemies
         this.mmoBullets = []; // All bullets in the world
         this.mmoScore = 0; // Individual score
@@ -1888,15 +1889,19 @@ detectMobileDevice() {
         // Handle asteroid destroyed
         socket.on('mmo-asteroid-destroyed', (data) => {
             console.log('💥 MMO CLIENT: Received asteroid-destroyed event', data);
-            const asteroid = this.mmoAsteroids.get(data.asteroidId);
-            if (asteroid) {
-                console.log('💥 MMO CLIENT: Removing asteroid and creating debris');
-                // Create debris
+            // Shooter already removed it and drew debris locally
+            if (this.mmoAsteroids.has(data.asteroidId)) {
                 this.createDebrisAtPosition(data.x, data.y);
                 this.mmoAsteroids.delete(data.asteroidId);
-            } else {
-                console.log('💥 MMO CLIENT: Asteroid not found in local map');
             }
+            this.mmoPendingDestroy.delete(data.asteroidId);
+
+            // Server-computed fragments: identical ids, positions, velocities and shapes everywhere
+            (data.children || []).forEach(child => {
+                if (!this.mmoAsteroids.has(child.id)) {
+                    this.mmoAsteroids.set(child.id, this.createMMOAsteroid(child));
+                }
+            });
         });
 
         // Handle enemy spawn
@@ -2049,6 +2054,7 @@ detectMobileDevice() {
 
         // Load initial asteroids
         this.mmoAsteroids.clear();
+        this.mmoPendingDestroy.clear();
         data.asteroids.forEach(ast => {
             this.mmoAsteroids.set(ast.id, this.createMMOAsteroid(ast));
         });
@@ -2111,14 +2117,13 @@ detectMobileDevice() {
      * Create MMO asteroid from server data
      */
     createMMOAsteroid(data) {
-        const asteroid = new Asteroid(data.x, data.y, data.size || 2, this);
+        // Radius comes from size and shape from seed, so every client draws the same asteroid
+        const asteroid = new Asteroid(data.x, data.y, data.size || 2, this, data.seed);
         asteroid.id = data.id;
         asteroid.vx = data.vx || 0;
         asteroid.vy = data.vy || 0;
         asteroid.rotation = data.rotation || 0;
         asteroid.rotationSpeed = data.rotationSpeed || 0;
-        asteroid.radius = data.radius || 30;
-        asteroid.seed = data.seed || Math.random() * 10000;
         return asteroid;
     }
 
@@ -2183,10 +2188,16 @@ detectMobileDevice() {
                 asteroid.vx = astData.vx;
                 asteroid.vy = astData.vy;
                 asteroid.rotation = astData.rotation;
-            } else {
+            } else if (!this.mmoPendingDestroy.has(astData.id)) {
                 this.mmoAsteroids.set(astData.id, this.createMMOAsteroid(astData));
             }
         });
+
+        // Expire local hits the server never confirmed (e.g. another player got it first)
+        const now = Date.now();
+        for (const [id, t] of this.mmoPendingDestroy) {
+            if (now - t > 1000) this.mmoPendingDestroy.delete(id);
+        }
 
         // Remove asteroids not in update
         const serverAsteroidIds = new Set(data.asteroids.map(a => a.id));
@@ -2337,6 +2348,7 @@ detectMobileDevice() {
         this.mmoSessionId = null;
         this.mmoPlayers.clear();
         this.mmoAsteroids.clear();
+        this.mmoPendingDestroy.clear();
         this.mmoEnemies.clear();
     }
 
@@ -2439,6 +2451,14 @@ detectMobileDevice() {
     updateMMO(dt) {
         // Handle input (controls)
         this.handleInput();
+
+        // Extrapolate asteroids between 20Hz server snapshots (server units are per 60fps frame)
+        const frames = dt * 60;
+        for (const [, asteroid] of this.mmoAsteroids) {
+            asteroid.x += asteroid.vx * frames;
+            asteroid.y += asteroid.vy * frames;
+            asteroid.rotation += asteroid.rotationSpeed * frames;
+        }
 
         // Touch controls
         if (this.ship && this.touchControls && this.touchControls.isActive()) {
@@ -2585,9 +2605,10 @@ detectMobileDevice() {
                         });
                     }
 
-                    // Create debris locally for immediate feedback
+                    // Create debris locally for immediate feedback; fragments come from the server
                     this.createDebrisAtPosition(asteroid.x, asteroid.y);
                     this.mmoAsteroids.delete(asteroidId);
+                    this.mmoPendingDestroy.set(asteroidId, Date.now());
                     break;
                 }
             }

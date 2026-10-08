@@ -44,6 +44,21 @@ const MMO_CONFIG = {
   waveDelay: 2000 // ms delay before spawning new wave
 };
 
+// Size is the source of truth for radius/speed/score, matching the client Asteroid class
+const MMO_ASTEROID_SIZES = {
+  3: { radius: 40, speed: 1 },
+  2: { radius: 25, speed: 1.5 },
+  1: { radius: 15, speed: 2 }
+};
+
+function newSeed() {
+  return Math.floor(Math.random() * 4294967296);
+}
+
+function childSeed(parentSeed, index) {
+  return (Math.imul(parentSeed ^ (index + 1), 2654435761) + index * 40503) >>> 0;
+}
+
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
@@ -236,15 +251,57 @@ function spawnMMOAsteroid(session) {
   const vx = Math.cos(angle) * speed;
   const vy = Math.sin(angle) * speed;
 
+  const size = 2 + Math.floor(Math.random() * 2); // Size 2 or 3
   return {
     id,
     x, y, vx, vy,
-    size: 2 + Math.floor(Math.random() * 2), // Size 2 or 3
-    radius: 30 + Math.random() * 20,
+    size,
+    radius: MMO_ASTEROID_SIZES[size].radius,
     rotation: Math.random() * Math.PI * 2,
     rotationSpeed: (Math.random() - 0.5) * 0.02,
-    seed: Math.random() * 10000
+    seed: newSeed()
   };
+}
+
+// Remove an asteroid and, if large enough, replace it with two smaller children.
+// The server is the only authority: clients receive the exact children and render them.
+function destroyMMOAsteroid(session, asteroid, destroyedBy) {
+  session.asteroids.delete(asteroid.id);
+
+  const children = [];
+  if (asteroid.size > 1) {
+    const size = asteroid.size - 1;
+    const { radius, speed } = MMO_ASTEROID_SIZES[size];
+    const heading = Math.atan2(asteroid.vy, asteroid.vx);
+    const spread = 0.5 + Math.random() * 0.7;
+
+    [-1, 1].forEach((side, i) => {
+      const angle = heading + side * spread;
+      const child = {
+        id: `${asteroid.id}_${i ? 'b' : 'a'}`,
+        x: asteroid.x + Math.cos(angle) * radius * 0.5,
+        y: asteroid.y + Math.sin(angle) * radius * 0.5,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size,
+        radius,
+        rotation: asteroid.rotation,
+        rotationSpeed: asteroid.rotationSpeed * -side * 1.5,
+        seed: childSeed(asteroid.seed, i)
+      };
+      session.asteroids.set(child.id, child);
+      children.push(child);
+    });
+  }
+
+  io.to('mmo-world').emit('mmo-asteroid-destroyed', {
+    asteroidId: asteroid.id,
+    destroyedBy,
+    x: asteroid.x,
+    y: asteroid.y,
+    size: asteroid.size,
+    children
+  });
 }
 
 function spawnMMOEnemy(session) {
@@ -1348,15 +1405,7 @@ io.on('connection', (socket) => {
       const asteroid = mmoWorld.asteroids.get(data.objectId);
       if (asteroid) {
         mmoDebug('💥 MMO: Destroying asteroid from ship collision:', data.objectId);
-        mmoWorld.asteroids.delete(data.objectId);
-
-        // Broadcast destruction
-        io.to('mmo-world').emit('mmo-asteroid-destroyed', {
-          asteroidId: data.objectId,
-          destroyedBy: socket.id,
-          x: data.x,
-          y: data.y
-        });
+        destroyMMOAsteroid(mmoWorld, asteroid, socket.id);
       }
     } else if (data.type === 'enemy') {
       const enemy = mmoWorld.enemies.get(data.objectId);
@@ -1403,15 +1452,7 @@ io.on('connection', (socket) => {
           broadcastMMOHighestScore(mmoWorld);
         }
 
-        mmoWorld.asteroids.delete(data.objectId);
-
-        // Broadcast destruction to ALL clients (including shooter for debris animation)
-        io.to('mmo-world').emit('mmo-asteroid-destroyed', {
-          asteroidId: data.objectId,
-          destroyedBy: socket.id,
-          x: data.x,
-          y: data.y
-        });
+        destroyMMOAsteroid(mmoWorld, asteroid, socket.id);
       }
     } else if (data.type === 'enemy') {
       const enemy = mmoWorld.enemies.get(data.objectId);
