@@ -19,6 +19,7 @@ const io = new Server(server, {
   }
 });
 const PORT = process.env.PORT || 3001;
+const mmoDebug = process.env.MMO_DEBUG ? console.log : () => {};
 
 // In-memory storage for simple sessions
 const simpleSessions = new Map(); // sessionId -> { id, hostPlayerId, maxPlayers, currentPlayers, gameState, worldWidth, worldHeight, createdAt }
@@ -386,6 +387,8 @@ function updateMMOEnemies(session, deltaTime) {
       enemy.vy = Math.sin(enemy.angle) * MMO_CONFIG.enemySpeed;
       enemy.x += enemy.vx * deltaTime * 0.5;
       enemy.y += enemy.vy * deltaTime * 0.5;
+      enemy.x = Math.max(0, Math.min(session.worldWidth, enemy.x));
+      enemy.y = Math.max(0, Math.min(session.worldHeight, enemy.y));
 
       // Shoot at player occasionally
       if (now - enemy.lastShot > enemy.shootCooldown && nearestDist < 400) {
@@ -457,8 +460,10 @@ function broadcastMMOHighestScore(session) {
 
 function mmoGameTick(session) {
   const now = Date.now();
-  const deltaTime = (now - session.lastTick) / 16.67; // Normalize to 60fps
+  const deltaTime = Math.min((now - session.lastTick) / 16.67, 3); // Normalize to 60fps, cap after stalls
   session.lastTick = now;
+
+  if (session.players.size === 0) return;
 
   // Update asteroids
   updateMMOAsteroids(session, deltaTime);
@@ -483,8 +488,7 @@ function mmoGameTick(session) {
       y: p.y,
       angle: p.angle,
       score: p.score,
-      dead: p.dead,
-      shipData: p.shipData
+      dead: p.dead
     })),
     timestamp: now
   });
@@ -1022,14 +1026,6 @@ io.on('connection', (socket) => {
     socket.to(socket.currentSession).emit('enemies-update', data);
   });
   
-  // Handle enemy shooting (host broadcasts to clients)
-  socket.on('enemy-shoot', (data) => {
-    if (!socket.currentSession) return;
-    
-    console.log(`💥 SERVER: Enemy ${data.enemyId} shooting`);
-    socket.to(socket.currentSession).emit('enemy-shoot', data);
-  });
-  
   // Handle mathematical objects spawn (formula-based synchronization)
   socket.on('math-objects-spawn', (data, callback) => {
     if (!socket.currentSession) {
@@ -1267,7 +1263,7 @@ io.on('connection', (socket) => {
     };
 
     mmoWorld.bullets.push(bullet);
-    console.log(`🔫 MMO: Bullet created at (${bullet.x.toFixed(0)}, ${bullet.y.toFixed(0)}), total bullets: ${mmoWorld.bullets.length}`);
+    mmoDebug(`🔫 MMO: Bullet created at (${bullet.x.toFixed(0)}, ${bullet.y.toFixed(0)}), total bullets: ${mmoWorld.bullets.length}`);
 
     // Broadcast bullet to all players (including shooter for visual)
     io.to('mmo-world').emit('mmo-bullet-fired', {
@@ -1281,7 +1277,7 @@ io.on('connection', (socket) => {
     if (!socket.inMMOWorld || !mmoWorld) return;
 
     const player = mmoWorld.players.get(socket.id);
-    if (!player) return;
+    if (!player || player.dead) return;
 
     player.dead = true;
     player.respawnTime = Date.now() + 3000; // 3 second respawn
@@ -1320,12 +1316,12 @@ io.on('connection', (socket) => {
   socket.on('mmo-ship-collision', (data) => {
     if (!socket.inMMOWorld || !mmoWorld) return;
 
-    console.log('💥 MMO: Ship collision event received:', data);
+    mmoDebug('💥 MMO: Ship collision event received:', data);
 
     if (data.type === 'asteroid') {
       const asteroid = mmoWorld.asteroids.get(data.objectId);
       if (asteroid) {
-        console.log('💥 MMO: Destroying asteroid from ship collision:', data.objectId);
+        mmoDebug('💥 MMO: Destroying asteroid from ship collision:', data.objectId);
         mmoWorld.asteroids.delete(data.objectId);
 
         // Broadcast destruction
@@ -1339,7 +1335,7 @@ io.on('connection', (socket) => {
     } else if (data.type === 'enemy') {
       const enemy = mmoWorld.enemies.get(data.objectId);
       if (enemy) {
-        console.log('💥 MMO: Destroying enemy from ship collision:', data.objectId);
+        mmoDebug('💥 MMO: Destroying enemy from ship collision:', data.objectId);
         mmoWorld.enemies.delete(data.objectId);
 
         // Broadcast destruction
@@ -1357,20 +1353,20 @@ io.on('connection', (socket) => {
   socket.on('mmo-bullet-hit', (data) => {
     if (!socket.inMMOWorld || !mmoWorld) return;
 
-    console.log('💥 MMO: Bullet hit event received:', data);
+    mmoDebug('💥 MMO: Bullet hit event received:', data);
 
     const player = mmoWorld.players.get(socket.id);
 
     if (data.type === 'asteroid') {
       const asteroid = mmoWorld.asteroids.get(data.objectId);
       if (asteroid) {
-        console.log('💥 MMO: Destroying asteroid from bullet hit:', data.objectId);
+        mmoDebug('💥 MMO: Destroying asteroid from bullet hit:', data.objectId);
 
         // Award points
         if (player) {
           const points = (4 - (asteroid.size || 2)) * 100;
           player.score += points;
-          console.log(`💥 MMO: Awarding ${points} points to ${player.name}, score=${player.score}`);
+          mmoDebug(`💥 MMO: Awarding ${points} points to ${player.name}, score=${player.score}`);
 
           io.to('mmo-world').emit('mmo-score-update', {
             playerId: socket.id,
@@ -1394,7 +1390,7 @@ io.on('connection', (socket) => {
     } else if (data.type === 'enemy') {
       const enemy = mmoWorld.enemies.get(data.objectId);
       if (enemy) {
-        console.log('💥 MMO: Enemy hit by bullet:', data.objectId);
+        mmoDebug('💥 MMO: Enemy hit by bullet:', data.objectId);
         enemy.health = (enemy.health || 3) - 1;
 
         // Broadcast hit feedback to shooter for visual effect
@@ -1406,12 +1402,12 @@ io.on('connection', (socket) => {
         });
 
         if (enemy.health <= 0) {
-          console.log('💥 MMO: Enemy destroyed by bullet hit:', data.objectId);
+          mmoDebug('💥 MMO: Enemy destroyed by bullet hit:', data.objectId);
 
           // Award points
           if (player) {
             player.score += 500;
-            console.log(`💥 MMO: Awarding 500 points to ${player.name}, score=${player.score}`);
+            mmoDebug(`💥 MMO: Awarding 500 points to ${player.name}, score=${player.score}`);
 
             io.to('mmo-world').emit('mmo-score-update', {
               playerId: socket.id,

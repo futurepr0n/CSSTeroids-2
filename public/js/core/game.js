@@ -1820,6 +1820,7 @@ detectMobileDevice() {
         socket.off('mmo-player-died');
         socket.off('mmo-respawn');
         socket.off('mmo-player-respawned');
+        socket.off('mmo-ship-data');
 
         // Handle successful join
         socket.on('mmo-join-success', (data) => {
@@ -1847,6 +1848,11 @@ detectMobileDevice() {
         // Handle state updates from server
         socket.on('mmo-state', (data) => {
             this.handleMMOStateUpdate(data);
+        });
+
+        socket.on('mmo-ship-data', (data) => {
+            const entry = this.mmoPlayers.get(data.playerId);
+            if (entry && data.shipData) entry.ship.applyCustomization(data.shipData);
         });
 
         // Handle player joined
@@ -2248,14 +2254,14 @@ detectMobileDevice() {
     sendMMOPlayerUpdate() {
         if (!this.isMMO() || !this.ship || this.mmoDead) return;
 
+        const { x, y, angle, vx, vy } = this.ship;
+        const last = this.lastMMOSent;
+        const now = Date.now();
+        if (last && last.x === x && last.y === y && last.angle === angle && now - last.t < 1000) return;
+
         if (window.socketManager?.socket) {
-            window.socketManager.socket.emit('mmo-player-update', {
-                x: this.ship.x,
-                y: this.ship.y,
-                angle: this.ship.angle,
-                vx: this.ship.vx,
-                vy: this.ship.vy
-            });
+            window.socketManager.socket.volatile.emit('mmo-player-update', { x, y, angle, vx, vy });
+            this.lastMMOSent = { x, y, angle, t: now };
         }
     }
 
