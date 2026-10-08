@@ -1559,7 +1559,7 @@ app.get('/admin', (req, res) => {
 });
 
 // Sync database and start server
-db.sequelize.sync({ alter: true })
+db.sequelize.sync()
   .then(() => {
     console.log('Database connected and synced successfully');
     startServer();
