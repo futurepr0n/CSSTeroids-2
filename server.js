@@ -36,6 +36,11 @@ const MMO_CONFIG = {
   tickRate: 50, // ms between server ticks (20 ticks/sec)
   asteroidSpeed: { min: 0.3, max: 1.2 },
   enemySpeed: 1.5,
+  enemyTurnRate: 0.04, // rad per frame
+  enemyThrust: 0.05, // accel per frame while facing target
+  enemyDrag: 0.99,
+  enemyFireCone: 0.15, // rad; must face target within this to fire
+  enemyFireRange: 450,
   waveDelay: 2000 // ms delay before spawning new wave
 };
 
@@ -375,33 +380,54 @@ function updateMMOEnemies(session, deltaTime) {
     }
 
     if (nearestPlayer) {
-      // Turn towards player
+      // Rotate toward target at a limited turn rate, like a player ship
       const targetAngle = Math.atan2(nearestPlayer.y - enemy.y, nearestPlayer.x - enemy.x);
       let angleDiff = targetAngle - enemy.angle;
       while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
       while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-      enemy.angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), 0.03 * deltaTime);
+      enemy.angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), MMO_CONFIG.enemyTurnRate * deltaTime);
+      const facingError = Math.abs(angleDiff);
 
-      // Move towards player
-      enemy.vx = Math.cos(enemy.angle) * MMO_CONFIG.enemySpeed;
-      enemy.vy = Math.sin(enemy.angle) * MMO_CONFIG.enemySpeed;
-      enemy.x += enemy.vx * deltaTime * 0.5;
-      enemy.y += enemy.vy * deltaTime * 0.5;
-      enemy.x = Math.max(0, Math.min(session.worldWidth, enemy.x));
-      enemy.y = Math.max(0, Math.min(session.worldHeight, enemy.y));
+      // Thrust only along current heading, and only when roughly facing the target
+      if (facingError < Math.PI / 2 && nearestDist > 150) {
+        enemy.vx += Math.cos(enemy.angle) * MMO_CONFIG.enemyThrust * deltaTime;
+        enemy.vy += Math.sin(enemy.angle) * MMO_CONFIG.enemyThrust * deltaTime;
+      }
 
-      // Shoot at player occasionally
-      if (now - enemy.lastShot > enemy.shootCooldown && nearestDist < 400) {
+      // Fire only from the nose, when aimed within the cone
+      if (now - enemy.lastShot > enemy.shootCooldown &&
+          nearestDist < MMO_CONFIG.enemyFireRange &&
+          facingError < MMO_CONFIG.enemyFireCone) {
         enemy.lastShot = now;
-
-        // Broadcast enemy shoot
         io.to(`mmo-world`).emit('mmo-enemy-shoot', {
           enemyId: id,
-          x: enemy.x,
-          y: enemy.y,
+          x: enemy.x + Math.cos(enemy.angle) * 15,
+          y: enemy.y + Math.sin(enemy.angle) * 15,
           angle: enemy.angle
         });
       }
+    }
+
+    // Inertia: drag, speed cap, integrate
+    const drag = Math.pow(MMO_CONFIG.enemyDrag, deltaTime);
+    enemy.vx *= drag;
+    enemy.vy *= drag;
+    const speed = Math.hypot(enemy.vx, enemy.vy);
+    if (speed > MMO_CONFIG.enemySpeed) {
+      enemy.vx *= MMO_CONFIG.enemySpeed / speed;
+      enemy.vy *= MMO_CONFIG.enemySpeed / speed;
+    }
+    enemy.x += enemy.vx * deltaTime;
+    enemy.y += enemy.vy * deltaTime;
+
+    // Bounce off world edges
+    if (enemy.x < 0 || enemy.x > session.worldWidth) {
+      enemy.x = Math.max(0, Math.min(session.worldWidth, enemy.x));
+      enemy.vx = -enemy.vx * 0.5;
+    }
+    if (enemy.y < 0 || enemy.y > session.worldHeight) {
+      enemy.y = Math.max(0, Math.min(session.worldHeight, enemy.y));
+      enemy.vy = -enemy.vy * 0.5;
     }
   }
 }

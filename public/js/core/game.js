@@ -2128,8 +2128,8 @@ detectMobileDevice() {
     createMMOEnemy(data) {
         const enemy = new Enemy(data.x, data.y, this);
         enemy.id = data.id;
-        // Server uses math angle (0=right), convert to game angle (0=up)
-        enemy.angle = (data.angle || 0) + Math.PI / 2;
+        // Enemy sprite and server share math angle convention (0=right)
+        enemy.angle = data.angle || 0;
         enemy.health = data.health || 3;
         return enemy;
     }
@@ -2202,8 +2202,8 @@ detectMobileDevice() {
             if (enemy) {
                 enemy.x = enemyData.x;
                 enemy.y = enemyData.y;
-                // Server uses math angle (0=right), convert to game angle (0=up)
-                enemy.angle = (enemyData.angle || 0) + Math.PI / 2;
+                // Enemy sprite and server share math angle convention (0=right)
+                enemy.angle = enemyData.angle || 0;
                 enemy.health = enemyData.health;
             } else {
                 this.mmoEnemies.set(enemyData.id, this.createMMOEnemy(enemyData));
