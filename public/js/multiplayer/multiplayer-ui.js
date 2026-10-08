@@ -609,132 +609,15 @@ class MultiplayerUI {
             currentSessionId: window.socketManager?.currentSessionId
         });
         
-        // Set up session info BEFORE game initialization
-        if (window.sessionManager) {
-            const sessionStatus = window.sessionManager.getSessionStatus();
-            const playerId = window.socketManager ? window.socketManager.socket.id : 'player_' + Math.random().toString(36).substr(2, 9);
-            
-            // More robust host detection - compare with session's hostPlayerId
-            let isHost = window.sessionManager.isHost;
-            if (sessionStatus.session && sessionStatus.session.hostPlayerId) {
-                const serverDeterminedHost = (playerId === sessionStatus.session.hostPlayerId);
-                debugLog('🎮 INIT: 🚨 HOST STATUS VERIFICATION 🚨', {
-                    sessionManagerSaysHost: window.sessionManager.isHost,
-                    myPlayerId: playerId,
-                    sessionHostPlayerId: sessionStatus.session.hostPlayerId,
-                    serverDeterminedHost: serverDeterminedHost,
-                    finalHostStatus: serverDeterminedHost
-                });
-                isHost = serverDeterminedHost; // Use server's authoritative determination
-            }
-            
-            debugLog('🎮 INIT: Setting up multiplayer session info...');
-            debugLog('🎮 INIT: 🚨 HOST STATUS DEBUG 🚨', {
-                sessionManagerIsHost: window.sessionManager.isHost,
-                calculatedIsHost: isHost,
-                sessionManagerExists: !!window.sessionManager,
-                currentSession: sessionStatus.session?.id,
-                playerId: playerId,
-                socketId: window.socketManager?.socket?.id
-            });
-            debugLog('🎮 INIT: SessionManager state:', {
-                hasSessionManager: !!window.sessionManager,
-                sessionStatus: sessionStatus,
-                hasSocketManager: !!window.socketManager,
-                socketConnected: window.socketManager?.isConnected,
-                socketId: window.socketManager?.socket?.id,
-                isHost: isHost,
-                playerId: playerId
-            });
-            
-            // Check if we have a valid session
-            if (sessionStatus.session && sessionStatus.session.id) {
-                // Set multiplayer session info in the game FIRST
-                debugLog(`🎮 INIT: Setting multiplayer session: ${sessionStatus.session.id}, Player: ${playerId}, Host: ${isHost}`);
-                window.game.setMultiplayerSession(sessionStatus.session.id, playerId, isHost);
-                debugLog(`🎮 INIT: Session setup complete: ${sessionStatus.session.id}, Player: ${playerId}, Host: ${isHost}`);
-            } else {
-                console.error('🎮 INIT ERROR: No valid session available for multiplayer setup!', sessionStatus);
-                // Try to get session from current session ID
-                if (window.socketManager && window.socketManager.currentSessionId) {
-                    debugLog('🎮 INIT: Using socket manager session ID:', window.socketManager.currentSessionId);
-                    window.game.setMultiplayerSession(window.socketManager.currentSessionId, playerId, isHost);
-                } else {
-                    console.error('🎮 INIT ERROR: Cannot set up multiplayer session - no session ID available');
-                    return;
-                }
-            }
-        } else {
-            console.error('🎮 INIT ERROR: No session manager available for multiplayer setup!');
-        }
-        
-        // Set game mode BEFORE initializing
-        window.game.setGameMode('multiplayer', {
-            width: worldDimensions.width,
-            height: worldDimensions.height
-        });
-        
-        // Hide all menu screens (like the regular game start does)
+        // Co-op sessions run on a server-ticked world (same engine as MMO):
+        // the server owns asteroids, enemies, splits, rounds and shared lives.
         this.hideAllMenuScreens();
-        
-        // Initialize the game (this creates the ship and starts the game loop)
-        debugLog('🎮 INIT: About to call window.game.init()...');
-        window.game.init();
-        debugLog('🎮 INIT: window.game.init() completed');
+        const sessionId = window.sessionManager?.getSessionStatus()?.session?.id || window.socketManager?.currentSessionId;
+        window.game.startMMOGame(sessionId, {
+            name: localStorage.getItem('playerName') || 'Anonymous',
+            shipData: this.loadedShipData || null
+        });
 
-        // CRITICAL FIX: Explicitly trigger handleGameStarted to ensure round progression variables are set
-        // This fixes a race condition where the game-started event handler is registered AFTER the event fires
-        debugLog('🎮 INIT: Explicitly calling handleGameStarted to ensure proper initialization');
-        window.game.handleGameStarted({
-            sessionId: window.sessionManager?.currentSession?.id,
-            worldWidth: worldDimensions.width,
-            worldHeight: worldDimensions.height,
-            startedBy: window.socketManager?.socket?.id,
-            timestamp: Date.now()
-        });
-        
-        // Apply loaded custom ship data to the player's ship (like custom-ships-minimal.html)
-        if (this.loadedShipData && window.game.ship) {
-            debugLog('🚢 INIT: Applying loaded ship data to player ship:', this.loadedShipData);
-            this.applyShipDataToGame(window.game.ship, this.loadedShipData);
-            
-            // Broadcast ship data to other players (like custom-ships-minimal.html)
-            if (window.socketManager && window.socketManager.isConnected) {
-                debugLog('🚢 INIT: Broadcasting ship data to other players');
-                window.socketManager.emit('player-ship-data', {
-                    shipData: this.loadedShipData
-                });
-            }
-        } else {
-            debugLog('🚢 INIT: No custom ship data loaded or no ship available');
-        }
-        
-        // Check post-initialization state
-        debugLog('🎮 INIT: Post-initialization socket state:', {
-            hasSocketManager: !!window.socketManager,
-            isConnected: window.socketManager?.isConnected,
-            socketId: window.socketManager?.socket?.id,
-            currentSessionId: window.socketManager?.currentSessionId,
-            gameMode: window.game?.gameMode,
-            isMultiplayer: window.game?.isMultiplayer()
-        });
-        
-        // If host, immediately broadcast initial game state to sync all players
-        if (window.sessionManager && window.sessionManager.isHost) {
-            debugLog('🎮 INIT: Host will broadcast initial game state in 100ms...');
-            setTimeout(() => {
-                if (window.game && window.game.broadcastGameState) {
-                    debugLog('🎮 INIT: Host broadcasting initial game state now');
-                    window.game.broadcastGameState();
-                    debugLog('🎮 INIT: Host sent initial game state to clients');
-                } else {
-                    console.error('🎮 INIT: Cannot broadcast - game or broadcastGameState method missing');
-                }
-            }, 100);
-        } else {
-            debugLog('🎮 INIT: Non-host client - waiting for game state from host');
-        }
-        
         debugLog('🎮 INIT: ✅ Multiplayer game initialization completed successfully!');
         debugLog(`Ship bounded to ${worldDimensions.width}x${worldDimensions.height} world`);
         debugLog('Real-time synchronization active!');

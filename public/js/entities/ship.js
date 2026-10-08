@@ -627,8 +627,8 @@ class Ship {
     
     handleMovementBounds() {
         // Check game mode and apply appropriate boundary behavior
-        // MMO mode also uses world bounds like multiplayer
-        if (this.game.isMultiplayer() || this.game.isMMO()) {
+        // MMO/co-op worlds use world bounds; single player wraps
+        if (this.game.isMMO()) {
             this.handleBoundaryCollision();
         } else {
             this.handleScreenWrap();
@@ -716,20 +716,9 @@ class Ship {
     }
   
     resetShip() {
-        // Reset position to center of world/screen
-        if (this.game.isMultiplayer && this.game.isMultiplayer()) {
-            const bounds = this.game.getWorldBounds();
-            if (bounds.enabled) {
-                this.x = bounds.width / 2;
-                this.y = bounds.height / 2;
-            } else {
-                this.x = this.game.canvas.width / 2;
-                this.y = this.game.canvas.height / 2;
-            }
-        } else {
-            this.x = this.game.canvas.width / 2;
-            this.y = this.game.canvas.height / 2;
-        }
+        // Reset position to center of screen
+        this.x = this.game.canvas.width / 2;
+        this.y = this.game.canvas.height / 2;
 
         // Reset velocity and rotation
         this.thrust = { x: 0, y: 0 };

@@ -12,6 +12,16 @@ class Enemy {
         this.shootCooldown = 0;
         this.shootInterval = 2 + Math.random() * 2; // Random interval between 2-4 seconds
 
+        // Ship physics: must face a direction to thrust or fire
+        this.vx = 0;
+        this.vy = 0;
+        this.thrust = 120; // px/s^2 along heading
+        this.drag = 0.6; // fraction of velocity kept per second
+        this.fireCone = 0.15; // rad; must face target within this to fire
+        this.fireRange = 450;
+        this.engageRange = 500;
+        this.wanderAngle = this.angle;
+
         // Visual properties
         this.radius = 15;
         this.color = 'red';
@@ -19,71 +29,81 @@ class Enemy {
         // State
         this.active = true;
 
-        // Multiplayer properties
+        // Server-assigned identity/health for MMO and co-op worlds
         this.id = null;
-        this.isMultiplayerEnemy = false;
         this.health = 3;
-        this.mode = 'patrol'; // 'patrol' or 'pursuit'
-        this.currentWaypoint = { x: 0, y: 0 };
-        this.waypointSeed = Date.now();
-        this.waypointIndex = 0;
-        this.pursuitTarget = null;
-        this.proximityThreshold = 200;
-        this.disengageThreshold = 300;
-        this.patrolSpeed = 80;
-        this.pursuitSpeed = 120;
-
-        // Target switching system
-        this.designatedTargetId = null; // 'main' for local ship, or playerId for other players
-        this.aggroDistance = 150; // Distance at which a bullet draws aggro
-
-        // Interpolation for smooth client movement
-        this.targetX = this.x;
-        this.targetY = this.y;
-        this.targetAngle = this.angle;
-        this.lerpSpeed = 10; // Interpolation speed multiplier
     }
     
     update(dt) {
         if (!this.active) return;
-        
-        // Use mathematical movement for synchronized enemies
-        if (this.isMathematical && this.mathData) {
-            this.updateMathematicalMovement();
-            return;
+
+        const target = this.getSinglePlayerTarget();
+        let facingError = Infinity;
+        let distance = Infinity;
+
+        if (target && target.distance < this.engageRange) {
+            distance = target.distance;
+            facingError = this.steerToward(target.x, target.y, dt, this.speed, 150);
+        } else {
+            // Wander: drift a heading and fly toward a point along it
+            this.wanderAngle += (Math.random() - 0.5) * 2 * dt;
+            this.steerToward(
+                this.x + Math.cos(this.wanderAngle) * 100,
+                this.y + Math.sin(this.wanderAngle) * 100,
+                dt, this.speed * 0.6
+            );
         }
-        
-        // If this is a client-controlled copy, don't run AI - just move based on interpolated position
-        if (this.isClientControlled) {
-            return; // Position is updated via interpolation from server updates
-        }
-        
-        // Move the enemy
-        this.x += Math.cos(this.angle) * this.speed * dt;
-        this.y += Math.sin(this.angle) * this.speed * dt;
-        
-        // Handle movement boundaries (wrapping or bouncing)
-        this.handleMovementBounds();
-        
-        // Check if we should change direction
-        if (Math.random() < 0.01) {
-            // 1% chance per frame to change angle
-            this.angle += (Math.random() - 0.5) * Math.PI / 2;
-        }
-        
-        // Update shooting cooldown
-        this.shootCooldown -= dt;
-        if (this.shootCooldown <= 0) {
-            this.shoot();
-            this.shootCooldown = this.shootInterval;
-        }
-        
-        // If player's ship exists, occasionally aim at it
-        if (this.game.ship && !this.game.ship.exploding && Math.random() < 0.03) {
-            this.aimAtPlayer();
-        }
+
+        this.applyPhysics(dt, this.speed);
+        this.wrapPosition();
+        this.tryFire(dt, facingError, distance);
     }
-    
+
+    getSinglePlayerTarget() {
+        const ship = this.game.ship;
+        if (!ship || ship.exploding) return null;
+        return { x: ship.x, y: ship.y, distance: Math.hypot(ship.x - this.x, ship.y - this.y) };
+    }
+
+    // Rotate toward a point at a limited rate; thrust only along current heading
+    // when roughly facing it and farther than standoff. Returns remaining facing error.
+    steerToward(tx, ty, dt, maxSpeed, standoff = 0) {
+        let angleDiff = Math.atan2(ty - this.y, tx - this.x) - this.angle;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        this.angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), this.rotationSpeed * dt);
+
+        const error = Math.abs(angleDiff);
+        const distance = Math.hypot(tx - this.x, ty - this.y);
+        if (error < Math.PI / 2 && distance > standoff) {
+            this.vx += Math.cos(this.angle) * this.thrust * dt;
+            this.vy += Math.sin(this.angle) * this.thrust * dt;
+        }
+        this.currentMaxSpeed = maxSpeed;
+        return error;
+    }
+
+    applyPhysics(dt, maxSpeed = this.currentMaxSpeed || this.speed) {
+        const keep = Math.pow(this.drag, dt);
+        this.vx *= keep;
+        this.vy *= keep;
+        const speed = Math.hypot(this.vx, this.vy);
+        if (speed > maxSpeed) {
+            this.vx *= maxSpeed / speed;
+            this.vy *= maxSpeed / speed;
+        }
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+    }
+
+    // Fire only from the nose when aimed within the cone and in range
+    tryFire(dt, facingError, distance) {
+        this.shootCooldown -= dt;
+        if (this.shootCooldown > 0 || facingError > this.fireCone || distance > this.fireRange) return null;
+        this.shootCooldown = this.shootInterval;
+        return this.shoot();
+    }
+
     draw(ctx) {
         if (!this.active) return;
 
@@ -130,16 +150,7 @@ class Enemy {
         
         ctx.restore();
     }
-    
-    handleMovementBounds() {
-        // Check game mode and apply appropriate boundary behavior
-        if (this.game.isMultiplayer()) {
-            this.handleBoundaryBounce();
-        } else {
-            this.wrapPosition();
-        }
-    }
-    
+
     wrapPosition() {
         // Wrap horizontal position
         if (this.x < 0) {
@@ -155,107 +166,7 @@ class Enemy {
             this.y = 0;
         }
     }
-    
-    handleBoundaryBounce() {
-        const bounds = this.game.getWorldBounds();
-        if (!bounds.enabled) {
-            this.wrapPosition();
-            return;
-        }
-        
-        // Bounce off world boundaries and change direction
-        if (this.x - this.radius <= 0) {
-            this.x = this.radius;
-            this.angle = Math.PI - this.angle; // Reflect angle horizontally
-        } else if (this.x + this.radius >= bounds.width) {
-            this.x = bounds.width - this.radius;
-            this.angle = Math.PI - this.angle; // Reflect angle horizontally
-        }
-        
-        if (this.y - this.radius <= 0) {
-            this.y = this.radius;
-            this.angle = -this.angle; // Reflect angle vertically
-        } else if (this.y + this.radius >= bounds.height) {
-            this.y = bounds.height - this.radius;
-            this.angle = -this.angle; // Reflect angle vertically
-        }
-    }
-    
-    aimAtPlayer() {
-        // In multiplayer, find the nearest player to target
-        let targetX, targetY;
-        
-        if (this.game.isMultiplayer && this.game.isMultiplayer()) {
-            // Find nearest player (including other players)
-            let nearestDistance = Infinity;
-            targetX = this.x;
-            targetY = this.y;
-            
-            // Check main player ship
-            if (this.game.ship && !this.game.ship.exploding) {
-                const dx = this.game.ship.x - this.x;
-                const dy = this.game.ship.y - this.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                if (distance < nearestDistance) {
-                    nearestDistance = distance;
-                    targetX = this.game.ship.x;
-                    targetY = this.game.ship.y;
-                }
-            }
-            
-            // Check other players
-            if (this.game.otherPlayers) {
-                for (const playerId in this.game.otherPlayers) {
-                    const player = this.game.otherPlayers[playerId];
-                    const dx = player.x - this.x;
-                    const dy = player.y - this.y;
-                    const distance = Math.sqrt(dx * dx + dy * dy);
-                    if (distance < nearestDistance) {
-                        nearestDistance = distance;
-                        targetX = player.x;
-                        targetY = player.y;
-                    }
-                }
-            }
-            
-            // No valid target found
-            if (nearestDistance === Infinity) return;
-        } else {
-            // Single player mode - target the player ship
-            if (!this.game.ship || this.game.ship.exploding) return;
-            targetX = this.game.ship.x;
-            targetY = this.game.ship.y;
-        }
-        
-        // Calculate angle to target
-        const dx = targetX - this.x;
-        const dy = targetY - this.y;
-        const targetAngle = Math.atan2(dy, dx);
-        
-        // Gradually turn toward the target
-        let angleDiff = targetAngle - this.angle;
-        
-        // Normalize angle difference to between -PI and PI
-        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-        
-        // Apply a small turn toward the target
-        this.angle += Math.sign(angleDiff) * 0.1;
-    }
-    
-    updateMathematicalMovement() {
-        const currentTime = Date.now();
-        const elapsedTime = (currentTime - this.mathData.spawnTime) / 1000; // Convert to seconds
-        
-        // Circular movement pattern (orbiting around center point)
-        const angle = this.mathData.baseSpeed * elapsedTime;
-        this.x = this.mathData.centerX + Math.cos(angle) * this.mathData.radius;
-        this.y = this.mathData.centerY + Math.sin(angle) * this.mathData.radius;
-        
-        // Face the direction of movement
-        this.angle = angle + Math.PI / 2; // Add 90 degrees to face forward
-    }
-    
+
     // Helper method to draw hexagons
     drawHexagon(ctx, x, y, radius, angle) {
         ctx.beginPath();
@@ -313,377 +224,6 @@ class Enemy {
         // Notify game to create explosion effect
         if (typeof this.game.createDebrisFromEnemy === 'function') {
             this.game.createDebrisFromEnemy(this);
-        }
-    }
-
-    // Multiplayer-specific methods
-
-    multiplayerUpdate(dt) {
-        if (!this.active || !this.isMultiplayerEnemy) return;
-
-        // Check if current target is still valid
-        this.updateTargetValidity();
-
-        if (this.mode === 'patrol') {
-            this.moveToWaypoint(dt);
-            this.checkForNearbyPlayers();
-        } else {
-            this.pursuePlayer(dt);
-            this.checkIfLostTarget();
-        }
-
-        // Only aim at the designated target if we have one, otherwise aim at nearest valid
-        if (this.designatedTargetId) {
-            this.aimAtDesignatedTarget();
-        } else {
-            this.aimAtNearestPlayer();
-        }
-
-        this.shootCooldown -= dt;
-        if (this.shootCooldown <= 0) {
-            const bullet = this.shoot();
-            if (bullet && this.game.isHost) {
-                this.game.broadcastEnemyShoot(this);
-            }
-            this.shootCooldown = this.shootInterval;
-        }
-    }
-
-    seededRandom() {
-        this.waypointSeed = (this.waypointSeed * 9301 + 49297) % 233280;
-        return this.waypointSeed / 233280;
-    }
-
-    generateNextWaypoint() {
-        const bounds = this.game.getWorldBounds();
-        const margin = 100;
-        const width = bounds.enabled ? bounds.width : this.game.canvas.width;
-        const height = bounds.enabled ? bounds.height : this.game.canvas.height;
-
-        this.currentWaypoint = {
-            x: margin + this.seededRandom() * (width - margin * 2),
-            y: margin + this.seededRandom() * (height - margin * 2)
-        };
-        this.waypointIndex++;
-    }
-
-    moveToWaypoint(dt) {
-        if (!this.currentWaypoint.x && !this.currentWaypoint.y) {
-            this.generateNextWaypoint();
-        }
-
-        const dx = this.currentWaypoint.x - this.x;
-        const dy = this.currentWaypoint.y - this.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        if (distance < 30) {
-            this.generateNextWaypoint();
-            return;
-        }
-
-        const targetAngle = Math.atan2(dy, dx);
-        this.x += Math.cos(targetAngle) * this.patrolSpeed * dt;
-        this.y += Math.sin(targetAngle) * this.patrolSpeed * dt;
-
-        this.handleBoundaryBounce();
-    }
-
-    checkForNearbyPlayers() {
-        const nearest = this.findNearestPlayer(true); // Exclude invulnerable
-        if (nearest && nearest.distance < this.proximityThreshold) {
-            this.mode = 'pursuit';
-            this.pursuitTarget = nearest;
-            // Set designated target
-            if (nearest.isMainShip) {
-                this.designatedTargetId = 'main';
-            } else if (nearest.playerId) {
-                this.designatedTargetId = nearest.playerId;
-            }
-        }
-    }
-
-    pursuePlayer(dt) {
-        if (!this.pursuitTarget) {
-            this.mode = 'patrol';
-            this.generateNextWaypoint(); // Get a new waypoint to move to
-            return;
-        }
-
-        const target = this.getTargetPosition(this.pursuitTarget);
-        if (!target) {
-            // Target is no longer valid (dead/invulnerable), go back to patrol
-            this.mode = 'patrol';
-            this.pursuitTarget = null;
-            this.generateNextWaypoint(); // Get a new waypoint away from current position
-            return;
-        }
-
-        const dx = target.x - this.x;
-        const dy = target.y - this.y;
-        const targetAngle = Math.atan2(dy, dx);
-
-        this.x += Math.cos(targetAngle) * this.pursuitSpeed * dt;
-        this.y += Math.sin(targetAngle) * this.pursuitSpeed * dt;
-
-        this.handleBoundaryBounce();
-    }
-
-    getTargetPosition(target) {
-        if (target.isMainShip && this.game.ship && !this.game.ship.exploding && !this.game.ship.invulnerable) {
-            return { x: this.game.ship.x, y: this.game.ship.y };
-        } else if (target.playerId && this.game.otherPlayers) {
-            const player = this.game.otherPlayers[target.playerId];
-            if (player && !player.exploding && !player.invulnerable) {
-                return { x: player.x, y: player.y };
-            }
-        }
-        return null;
-    }
-
-    checkIfLostTarget() {
-        if (!this.pursuitTarget) {
-            this.mode = 'patrol';
-            this.generateNextWaypoint();
-            return;
-        }
-
-        const target = this.getTargetPosition(this.pursuitTarget);
-        if (!target) {
-            // Target is invalid (dead, invulnerable, or disconnected)
-            this.mode = 'patrol';
-            this.pursuitTarget = null;
-            this.generateNextWaypoint();
-            return;
-        }
-
-        const dx = target.x - this.x;
-        const dy = target.y - this.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        if (distance > this.disengageThreshold) {
-            this.mode = 'patrol';
-            this.pursuitTarget = null;
-            this.generateNextWaypoint();
-        }
-    }
-
-    findNearestPlayer(excludeInvulnerable = true) {
-        let nearest = null;
-        let nearestDistance = Infinity;
-
-        if (this.game.ship && !this.game.ship.exploding) {
-            // Skip invulnerable players when excludeInvulnerable is true
-            if (!excludeInvulnerable || !this.game.ship.invulnerable) {
-                const dx = this.game.ship.x - this.x;
-                const dy = this.game.ship.y - this.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                if (distance < nearestDistance) {
-                    nearestDistance = distance;
-                    nearest = { isMainShip: true, distance: distance };
-                }
-            }
-        }
-
-        if (this.game.otherPlayers) {
-            for (const playerId in this.game.otherPlayers) {
-                const player = this.game.otherPlayers[playerId];
-                // Skip exploding or invulnerable players
-                if (player.exploding) continue;
-                if (excludeInvulnerable && player.invulnerable) continue;
-                const dx = player.x - this.x;
-                const dy = player.y - this.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                if (distance < nearestDistance) {
-                    nearestDistance = distance;
-                    nearest = { playerId: playerId, distance: distance };
-                }
-            }
-        }
-
-        return nearest;
-    }
-
-    aimAtNearestPlayer() {
-        const nearest = this.findNearestPlayer();
-        if (!nearest) return;
-
-        let targetX, targetY;
-        if (nearest.isMainShip) {
-            targetX = this.game.ship.x;
-            targetY = this.game.ship.y;
-        } else if (nearest.playerId && this.game.otherPlayers[nearest.playerId]) {
-            targetX = this.game.otherPlayers[nearest.playerId].x;
-            targetY = this.game.otherPlayers[nearest.playerId].y;
-        } else {
-            return;
-        }
-
-        const dx = targetX - this.x;
-        const dy = targetY - this.y;
-        const targetAngle = Math.atan2(dy, dx);
-
-        let angleDiff = targetAngle - this.angle;
-        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-
-        this.angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), this.rotationSpeed * 0.016);
-    }
-
-    aimAtDesignatedTarget() {
-        const targetPos = this.getDesignatedTargetPosition();
-        if (!targetPos) {
-            // Fallback to nearest player if designated target is invalid
-            this.aimAtNearestPlayer();
-            return;
-        }
-
-        const dx = targetPos.x - this.x;
-        const dy = targetPos.y - this.y;
-        const targetAngle = Math.atan2(dy, dx);
-
-        let angleDiff = targetAngle - this.angle;
-        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-
-        this.angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), this.rotationSpeed * 0.016);
-    }
-
-    getStateForBroadcast() {
-        return {
-            id: this.id,
-            x: this.x,
-            y: this.y,
-            angle: this.angle,
-            health: this.health,
-            mode: this.mode,
-            waypointIndex: this.waypointIndex
-        };
-    }
-
-    setStateFromNetwork(data) {
-        // Set target values for interpolation (smooth movement)
-        if (isFinite(data.x)) this.targetX = data.x;
-        if (isFinite(data.y)) this.targetY = data.y;
-        if (isFinite(data.angle)) this.targetAngle = data.angle;
-        if (typeof data.health === 'number') this.health = data.health;
-        if (data.mode) this.mode = data.mode;
-    }
-
-    // Interpolate towards target position (called for client-controlled enemies)
-    interpolatePosition(dt) {
-        if (!this.isClientControlled) return;
-
-        const lerpFactor = Math.min(1, this.lerpSpeed * dt);
-
-        // Lerp position
-        this.x += (this.targetX - this.x) * lerpFactor;
-        this.y += (this.targetY - this.y) * lerpFactor;
-
-        // Lerp angle (handle wraparound)
-        let angleDiff = this.targetAngle - this.angle;
-        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-        this.angle += angleDiff * lerpFactor;
-    }
-
-    takeDamage() {
-        this.health--;
-        if (this.health <= 0) {
-            this.hit();
-            return true;
-        }
-        return false;
-    }
-
-    // Target switching system methods
-
-    // Check if the designated target is still valid (alive and not invulnerable)
-    isDesignatedTargetValid() {
-        if (!this.designatedTargetId) return false;
-
-        if (this.designatedTargetId === 'main') {
-            return this.game.ship && !this.game.ship.exploding && !this.game.ship.invulnerable;
-        } else {
-            const player = this.game.otherPlayers?.[this.designatedTargetId];
-            return player && !player.exploding && !player.invulnerable;
-        }
-    }
-
-    // Get the position of the designated target
-    getDesignatedTargetPosition() {
-        if (!this.designatedTargetId) return null;
-
-        if (this.designatedTargetId === 'main') {
-            if (this.game.ship && !this.game.ship.exploding && !this.game.ship.invulnerable) {
-                return { x: this.game.ship.x, y: this.game.ship.y };
-            }
-        } else {
-            const player = this.game.otherPlayers?.[this.designatedTargetId];
-            if (player && !player.exploding && !player.invulnerable) {
-                return { x: player.x, y: player.y };
-            }
-        }
-        return null;
-    }
-
-    // Switch to the next available target, or clear target if none available
-    switchToNextTarget() {
-        // Find a valid target that is NOT the current one
-        const nearest = this.findNearestPlayer(true); // true = exclude invulnerable
-
-        if (nearest) {
-            if (nearest.isMainShip) {
-                this.designatedTargetId = 'main';
-            } else if (nearest.playerId) {
-                this.designatedTargetId = nearest.playerId;
-            }
-            this.mode = 'pursuit';
-            this.pursuitTarget = nearest;
-        } else {
-            // No valid targets, go to patrol
-            this.designatedTargetId = null;
-            this.mode = 'patrol';
-            this.pursuitTarget = null;
-            this.generateNextWaypoint();
-        }
-    }
-
-    // Check if a bullet fired from a position should steal aggro
-    // Called by game when a player shoots
-    checkBulletAggro(bulletX, bulletY, shooterId) {
-        // Calculate distance from bullet to enemy
-        const dx = bulletX - this.x;
-        const dy = bulletY - this.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        // If bullet is within aggro range and from a different player than current target
-        if (distance < this.aggroDistance) {
-            // Only steal aggro if the shooter is not the current target
-            const currentTargetIsShooter =
-                (this.designatedTargetId === 'main' && shooterId === 'main') ||
-                (this.designatedTargetId === shooterId);
-
-            if (!currentTargetIsShooter) {
-                // Steal aggro!
-                this.designatedTargetId = shooterId;
-                this.mode = 'pursuit';
-
-                // Update pursuit target
-                if (shooterId === 'main') {
-                    this.pursuitTarget = { isMainShip: true, distance: distance };
-                } else {
-                    this.pursuitTarget = { playerId: shooterId, distance: distance };
-                }
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // Update target validity and switch if needed (call this in multiplayerUpdate)
-    updateTargetValidity() {
-        if (!this.isDesignatedTargetValid()) {
-            this.switchToNextTarget();
         }
     }
 }

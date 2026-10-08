@@ -172,75 +172,6 @@ class SocketManager {
             console.error('Session error:', data);
             this.triggerEvent('session-error', data);
         });
-
-        // Game synchronization events (using simple session approach)
-        this.socket.on('player-update', (data) => {
-            // Forward to game using the same event name (no translation)
-            this.triggerEvent('player-update', data);
-        });
-
-        this.socket.on('game-objects-update', (data) => {
-            debugLog('🌍 SOCKET: ⭐ RECEIVED GAME-OBJECTS-UPDATE FROM SERVER! ⭐', {
-                asteroids: data.asteroids?.length || 0,
-                enemies: data.enemies?.length || 0,
-                bullets: data.bullets?.length || 0,
-                level: data.level,
-                score: data.score,
-                lives: data.lives,
-                currentSessionId: this.currentSessionId,
-                timestamp: new Date().toISOString()
-            });
-            debugLog('🌍 SOCKET: Raw asteroid data sample:', data.asteroids?.slice(0, 2));
-            debugLog('🌍 SOCKET: Now triggering game-objects-update event to game...');
-            // Forward to game using the same event name (no translation)
-            this.triggerEvent('game-objects-update', data);
-        });
-
-        this.socket.on('lives-update', (data) => {
-            debugLog('❤️ SOCKET: Received lives-update from server:', {
-                lives: data.lives,
-                sessionId: data.sessionId,
-                playerId: data.playerId,
-                timestamp: new Date().toISOString()
-            });
-            this.triggerEvent('lives-update', data);
-        });
-
-        this.socket.on('game-over', (data) => {
-            debugLog('💀 SOCKET: Received game-over from server:', {
-                reason: data.reason,
-                sessionId: data.sessionId,
-                timestamp: new Date().toISOString()
-            });
-            this.triggerEvent('game-over', data);
-        });
-
-        this.socket.on('level-complete', (data) => {
-            debugLog('🏆 SOCKET: Received level-complete from server:', {
-                newLevel: data.newLevel,
-                score: data.score,
-                sessionId: data.sessionId,
-                timestamp: new Date().toISOString()
-            });
-            this.triggerEvent('level-complete', data);
-        });
-
-        // Custom ship data sharing (like custom-ships-minimal.html)
-        this.socket.on('player-ship-data', (data) => {
-            debugLog('🚢 SOCKET: ⭐ RECEIVED PLAYER-SHIP-DATA! ⭐', {
-                playerId: data.playerId,
-                shipName: data.shipData?.name,
-                customLinesCount: data.shipData?.customLines?.length || 0,
-                color: data.shipData?.color,
-                timestamp: new Date().toISOString()
-            });
-            this.triggerEvent('player-ship-data', data);
-        });
-
-        this.socket.on('request-ship-data', (data) => {
-            debugLog('🔄 SOCKET: Received request-ship-data from server:', data);
-            this.triggerEvent('request-ship-data', data);
-        });
     }
 
     // Add connection status callback
@@ -354,19 +285,6 @@ class SocketManager {
                 currentSessionId: this.currentSessionId
             });
         }
-    }
-
-    // Broadcast ship data to other players (like custom-ships-minimal.html)
-    broadcastShipData(shipData) {
-        if (!this.isConnected || !this.currentSessionId) {
-            debugLog('🚢 SOCKET: Cannot broadcast ship data - not connected or no session');
-            return;
-        }
-        
-        debugLog('🚢 SOCKET: Broadcasting ship data to session:', this.currentSessionId, shipData);
-        this.socket.emit('player-ship-data', {
-            shipData: shipData
-        });
     }
 
     // Get connection status
