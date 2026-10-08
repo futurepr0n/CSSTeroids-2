@@ -1771,6 +1771,13 @@ detectMobileDevice() {
         this.mmoInvulnerable = false;
         this.mmoInvulnerableTimer = 0;
 
+        // Co-op sessions run on the same server-ticked world, with rounds and shared lives
+        this.mmoCoop = sessionId !== 'mmo_world';
+        this.coopRound = 0;
+        this.coopMaxRounds = 10;
+        this.coopLives = 3;
+        this.coopResult = null; // 'over' | 'complete'
+
         // Configure world bounds
         this.worldBounds.enabled = true;
         this.worldBounds.width = 2000;
@@ -1822,6 +1829,11 @@ detectMobileDevice() {
         socket.off('mmo-respawn');
         socket.off('mmo-player-respawned');
         socket.off('mmo-ship-data');
+        socket.off('mmo-round-start');
+        socket.off('mmo-round-cleared');
+        socket.off('mmo-lives');
+        socket.off('mmo-game-over');
+        socket.off('mmo-game-complete');
 
         // Handle successful join
         socket.on('mmo-join-success', (data) => {
@@ -1833,8 +1845,42 @@ detectMobileDevice() {
             this.worldBounds.width = data.worldBounds.width;
             this.worldBounds.height = data.worldBounds.height;
 
+            this.mmoCoop = data.mode === 'coop';
+            if (this.mmoCoop) {
+                this.coopRound = data.round || 0;
+                this.coopMaxRounds = data.maxRounds || 10;
+                this.coopLives = data.lives;
+                this.coopResult = null;
+            }
+
             // Initialize game with MMO state
             this.initMMOGame(data);
+        });
+
+        socket.on('mmo-round-start', (data) => {
+            this.coopRound = data.round;
+            this.coopMaxRounds = data.maxRounds;
+            this.showWorldMessage(`Round&nbsp;<span id="levelNumber">${data.round}</span>`);
+        });
+
+        socket.on('mmo-round-cleared', (data) => {
+            this.showWorldMessage(`Round ${data.round} cleared!`);
+        });
+
+        socket.on('mmo-lives', (data) => {
+            this.coopLives = data.lives;
+        });
+
+        socket.on('mmo-game-over', (data) => {
+            this.coopResult = 'over';
+            this.coopFinalScore = data.teamScore;
+            this.gameOver = true;
+        });
+
+        socket.on('mmo-game-complete', (data) => {
+            this.coopResult = 'complete';
+            this.coopFinalScore = data.teamScore;
+            this.gameOver = true;
         });
 
         // Handle join error
@@ -2352,6 +2398,17 @@ detectMobileDevice() {
         this.mmoEnemies.clear();
     }
 
+    showWorldMessage(html) {
+        if (!this.levelMessage) return;
+        this.levelMessage.innerHTML = html;
+        this.levelNumber = document.getElementById('levelNumber');
+        this.levelMessage.style.display = 'flex';
+        clearTimeout(this._worldMessageTimer);
+        this._worldMessageTimer = setTimeout(() => {
+            this.levelMessage.style.display = 'none';
+        }, 2000);
+    }
+
     /**
      * Draw MMO HUD
      */
@@ -2360,11 +2417,28 @@ detectMobileDevice() {
 
         this.ctx.save();
 
-        // MMO indicator
+        // Mode indicator
         this.ctx.fillStyle = '#0ff';
         this.ctx.font = 'bold 16px Arial';
         this.ctx.textAlign = 'center';
-        this.ctx.fillText('MMO WORLD', this.canvas.width / 2, 30);
+        if (this.mmoCoop) {
+            this.ctx.fillText(`CO-OP · ROUND ${this.coopRound}/${this.coopMaxRounds} · LIVES ${this.coopLives}`, this.canvas.width / 2, 30);
+        } else {
+            this.ctx.fillText('MMO WORLD', this.canvas.width / 2, 30);
+        }
+
+        if (this.coopResult) {
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+            this.ctx.fillRect(this.canvas.width / 2 - 180, this.canvas.height / 2 - 50, 360, 100);
+            this.ctx.fillStyle = this.coopResult === 'complete' ? '#0f0' : 'red';
+            this.ctx.font = 'bold 28px Arial';
+            this.ctx.fillText(this.coopResult === 'complete' ? 'ALL ROUNDS CLEARED!' : 'GAME OVER', this.canvas.width / 2, this.canvas.height / 2);
+            this.ctx.fillStyle = 'white';
+            this.ctx.font = '16px Arial';
+            this.ctx.fillText(`Team score: ${this.coopFinalScore || 0}`, this.canvas.width / 2, this.canvas.height / 2 + 30);
+            this.ctx.restore();
+            return;
+        }
 
         // Your score (top right)
         this.ctx.fillStyle = 'white';
@@ -3494,6 +3568,9 @@ detectMobileDevice() {
 
     handleGameStarted(data) {
         debugLog('🎮 GAME: *** GAME STARTED EVENT TRIGGERED ***', data);
+
+        // Co-op sessions now run on the server-ticked world
+        if (this.isMMO()) return;
 
         // Guard against multiple calls - only process once per game session
         if (this._gameStartedHandled) {

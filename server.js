@@ -8,7 +8,6 @@ require('dotenv').config();
 
 const highScoreRoutes = require('./routes/highscores');
 
-
 // Initialize express app
 const app = express();
 const server = createServer(app);
@@ -27,6 +26,13 @@ const simpleSessions = new Map(); // sessionId -> { id, hostPlayerId, maxPlayers
 // MMO persistent world - single world that always exists
 const MMO_WORLD_ID = 'mmo_world'; // Single persistent world ID
 let mmoWorld = null; // The single persistent MMO world
+const worlds = new Map(); // worldId -> world (persistent MMO + one per co-op session)
+
+const COOP_CONFIG = {
+  maxRounds: 10,
+  startingLives: 3,
+  roundDelay: 2000
+};
 const MMO_CONFIG = {
   maxPlayers: 5,
   maxAsteroids: 5,
@@ -63,7 +69,6 @@ function childSeed(parentSeed, index) {
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
-
 
 // Database connection
 const db = require('./models');
@@ -217,7 +222,7 @@ function getMMOHighestScore(session) {
   return highest;
 }
 
-function spawnMMOAsteroid(session) {
+function spawnMMOAsteroid(session, forcedSize) {
   const id = `ast_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
   const bounds = { width: session.worldWidth, height: session.worldHeight };
   const margin = 200; // Spawn within this margin from edges
@@ -251,7 +256,7 @@ function spawnMMOAsteroid(session) {
   const vx = Math.cos(angle) * speed;
   const vy = Math.sin(angle) * speed;
 
-  const size = 2 + Math.floor(Math.random() * 2); // Size 2 or 3
+  const size = forcedSize || 2 + Math.floor(Math.random() * 2); // Size 2 or 3
   return {
     id,
     x, y, vx, vy,
@@ -294,7 +299,7 @@ function destroyMMOAsteroid(session, asteroid, destroyedBy) {
     });
   }
 
-  io.to('mmo-world').emit('mmo-asteroid-destroyed', {
+  io.to(session.room).emit('mmo-asteroid-destroyed', {
     asteroidId: asteroid.id,
     destroyedBy,
     x: asteroid.x,
@@ -341,7 +346,54 @@ function spawnMMOEnemy(session) {
   };
 }
 
+function getCoopEnemyCount(round) {
+  if (round < 3) return 0;
+  if (round <= 5) return 1;
+  if (round <= 8) return 2;
+  return 3;
+}
+
+function startCoopRound(session, round) {
+  session.round = round;
+  session.roundTransitionAt = null;
+  for (let i = 0; i < round; i++) {
+    const asteroid = spawnMMOAsteroid(session, 3);
+    session.asteroids.set(asteroid.id, asteroid);
+    io.to(session.room).emit('mmo-asteroid-spawn', asteroid);
+  }
+  for (let i = 0; i < getCoopEnemyCount(round); i++) {
+    const enemy = spawnMMOEnemy(session);
+    session.enemies.set(enemy.id, enemy);
+    io.to(session.room).emit('mmo-enemy-spawn', enemy);
+  }
+  io.to(session.room).emit('mmo-round-start', { round, maxRounds: COOP_CONFIG.maxRounds });
+}
+
+function maintainCoopRound(session) {
+  if (session.finished || session.asteroids.size > 0 || session.enemies.size > 0) return;
+  const now = Date.now();
+
+  if (!session.roundTransitionAt) {
+    if (session.round >= COOP_CONFIG.maxRounds) {
+      session.finished = true;
+      io.to(session.room).emit('mmo-game-complete', { round: session.round, teamScore: getTeamScore(session) });
+      return;
+    }
+    session.roundTransitionAt = now + COOP_CONFIG.roundDelay;
+    io.to(session.room).emit('mmo-round-cleared', { round: session.round });
+  } else if (now >= session.roundTransitionAt) {
+    startCoopRound(session, session.round + 1);
+  }
+}
+
+function getTeamScore(session) {
+  let total = 0;
+  for (const [, p] of session.players) total += p.score;
+  return total;
+}
+
 function maintainMMOObjectCounts(session) {
+  if (session.mode === 'coop') return maintainCoopRound(session);
   const now = Date.now();
 
   // Wave-based asteroid spawning
@@ -351,17 +403,17 @@ function maintainMMOObjectCounts(session) {
       // Start wave timer
       session.asteroidWaveTime = now + MMO_CONFIG.waveDelay;
       console.log('🌊 MMO: Asteroid wave cleared! New wave in 2 seconds...');
-      io.to('mmo-world').emit('mmo-wave-cleared', { type: 'asteroids' });
+      io.to(session.room).emit('mmo-wave-cleared', { type: 'asteroids' });
     } else if (now >= session.asteroidWaveTime) {
       // Spawn new wave
       console.log('🌊 MMO: Spawning new asteroid wave!');
       for (let i = 0; i < MMO_CONFIG.maxAsteroids; i++) {
         const asteroid = spawnMMOAsteroid(session);
         session.asteroids.set(asteroid.id, asteroid);
-        io.to('mmo-world').emit('mmo-asteroid-spawn', asteroid);
+        io.to(session.room).emit('mmo-asteroid-spawn', asteroid);
       }
       session.asteroidWaveTime = null;
-      io.to('mmo-world').emit('mmo-wave-spawned', { type: 'asteroids', count: MMO_CONFIG.maxAsteroids });
+      io.to(session.room).emit('mmo-wave-spawned', { type: 'asteroids', count: MMO_CONFIG.maxAsteroids });
     }
   } else {
     // Reset timer if asteroids exist
@@ -373,16 +425,16 @@ function maintainMMOObjectCounts(session) {
     if (!session.enemyWaveTime) {
       session.enemyWaveTime = now + MMO_CONFIG.waveDelay;
       console.log('🌊 MMO: Enemy wave cleared! New wave in 2 seconds...');
-      io.to('mmo-world').emit('mmo-wave-cleared', { type: 'enemies' });
+      io.to(session.room).emit('mmo-wave-cleared', { type: 'enemies' });
     } else if (now >= session.enemyWaveTime) {
       console.log('🌊 MMO: Spawning new enemy wave!');
       for (let i = 0; i < MMO_CONFIG.maxEnemies; i++) {
         const enemy = spawnMMOEnemy(session);
         session.enemies.set(enemy.id, enemy);
-        io.to('mmo-world').emit('mmo-enemy-spawn', enemy);
+        io.to(session.room).emit('mmo-enemy-spawn', enemy);
       }
       session.enemyWaveTime = null;
-      io.to('mmo-world').emit('mmo-wave-spawned', { type: 'enemies', count: MMO_CONFIG.maxEnemies });
+      io.to(session.room).emit('mmo-wave-spawned', { type: 'enemies', count: MMO_CONFIG.maxEnemies });
     }
   } else {
     session.enemyWaveTime = null;
@@ -456,7 +508,7 @@ function updateMMOEnemies(session, deltaTime) {
           nearestDist < MMO_CONFIG.enemyFireRange &&
           facingError < MMO_CONFIG.enemyFireCone) {
         enemy.lastShot = now;
-        io.to(`mmo-world`).emit('mmo-enemy-shoot', {
+        io.to(session.room).emit('mmo-enemy-shoot', {
           enemyId: id,
           x: enemy.x + Math.cos(enemy.angle) * 15,
           y: enemy.y + Math.sin(enemy.angle) * 15,
@@ -538,7 +590,7 @@ function processMMOCollisions(session) {
 
 function broadcastMMOHighestScore(session) {
   const highest = getMMOHighestScore(session);
-  io.to(`mmo-world`).emit('mmo-highest-score', highest);
+  io.to(session.room).emit('mmo-highest-score', highest);
 }
 
 function mmoGameTick(session) {
@@ -561,7 +613,7 @@ function mmoGameTick(session) {
   maintainMMOObjectCounts(session);
 
   // Broadcast state to all clients
-  io.to(`mmo-world`).emit('mmo-state', {
+  io.to(session.room).emit('mmo-state', {
     asteroids: Array.from(session.asteroids.values()),
     enemies: Array.from(session.enemies.values()),
     players: Array.from(session.players.values()).map(p => ({
@@ -577,45 +629,88 @@ function mmoGameTick(session) {
   });
 }
 
-// Initialize the single persistent MMO world
-function initializePersistentMMOWorld() {
-  console.log('🌍 MMO: Initializing persistent world...');
-
-  mmoWorld = {
-    id: MMO_WORLD_ID,
+function createWorld(id, mode, options = {}) {
+  const world = {
+    id,
+    mode, // 'mmo' (persistent, endless waves) or 'coop' (session rounds with shared lives)
+    room: `world:${id}`,
+    maxPlayers: options.maxPlayers || MMO_CONFIG.maxPlayers,
     players: new Map(),
     asteroids: new Map(),
     enemies: new Map(),
     bullets: [],
-    worldWidth: MMO_CONFIG.worldWidth,
-    worldHeight: MMO_CONFIG.worldHeight,
+    worldWidth: options.width || MMO_CONFIG.worldWidth,
+    worldHeight: options.height || MMO_CONFIG.worldHeight,
     createdAt: new Date().toISOString(),
     tickInterval: null,
     lastTick: Date.now(),
     asteroidWaveTime: null,
-    enemyWaveTime: null
+    enemyWaveTime: null,
+    round: 0,
+    roundTransitionAt: null,
+    lives: COOP_CONFIG.startingLives,
+    finished: false
   };
 
-  // Initial spawn of asteroids and enemies (immediate, no wave delay)
-  for (let i = 0; i < MMO_CONFIG.maxAsteroids; i++) {
-    const asteroid = spawnMMOAsteroid(mmoWorld);
-    mmoWorld.asteroids.set(asteroid.id, asteroid);
-  }
-  for (let i = 0; i < MMO_CONFIG.maxEnemies; i++) {
-    const enemy = spawnMMOEnemy(mmoWorld);
-    mmoWorld.enemies.set(enemy.id, enemy);
+  if (mode === 'mmo') {
+    // Initial spawn of asteroids and enemies (immediate, no wave delay)
+    for (let i = 0; i < MMO_CONFIG.maxAsteroids; i++) {
+      const asteroid = spawnMMOAsteroid(world);
+      world.asteroids.set(asteroid.id, asteroid);
+    }
+    for (let i = 0; i < MMO_CONFIG.maxEnemies; i++) {
+      const enemy = spawnMMOEnemy(world);
+      world.enemies.set(enemy.id, enemy);
+    }
+  } else {
+    // Round 1 begins after a short delay so every client has joined
+    world.roundTransitionAt = Date.now() + COOP_CONFIG.roundDelay;
   }
 
-  // Start the game tick loop (runs forever)
-  mmoWorld.tickInterval = setInterval(() => {
-    mmoGameTick(mmoWorld);
-  }, MMO_CONFIG.tickRate);
-
-  console.log(`🌍 MMO: Persistent world initialized with ${mmoWorld.asteroids.size} asteroids and ${mmoWorld.enemies.size} enemies`);
-  console.log(`🌍 MMO: World is always active - players can join anytime (max ${MMO_CONFIG.maxPlayers})`);
+  world.tickInterval = setInterval(() => mmoGameTick(world), MMO_CONFIG.tickRate);
+  worlds.set(id, world);
+  return world;
 }
 
-// Socket.io connection handling
+function destroyWorld(world) {
+  clearInterval(world.tickInterval);
+  worlds.delete(world.id);
+  console.log(`🌍 World ${world.id} closed`);
+}
+
+function getOrCreateCoopWorld(sessionId) {
+  let world = worlds.get(sessionId);
+  if (!world) {
+    const session = simpleSessions.get(sessionId);
+    if (!session) return null;
+    world = createWorld(sessionId, 'coop', {
+      maxPlayers: session.maxPlayers,
+      width: session.worldWidth,
+      height: session.worldHeight
+    });
+    console.log(`🤝 Co-op world created for session ${sessionId}`);
+  }
+  return world;
+}
+
+function removePlayerFromWorld(socket, reason) {
+  const world = worlds.get(socket.worldId);
+  if (!world) return;
+  const player = world.players.get(socket.id);
+  world.players.delete(socket.id);
+  io.to(world.room).emit('mmo-player-left', { playerId: socket.id, playerName: player?.name });
+  socket.leave(world.room);
+  socket.worldId = null;
+  console.log(`🌍 ${world.id}: Player ${player?.name || socket.id} ${reason} (${world.players.size}/${world.maxPlayers})`);
+  if (world.mode === 'coop' && world.players.size === 0) destroyWorld(world);
+}
+
+// Initialize the single persistent MMO world
+function initializePersistentMMOWorld() {
+  mmoWorld = createWorld(MMO_WORLD_ID, 'mmo');
+  console.log(`🌍 MMO: Persistent world initialized with ${mmoWorld.asteroids.size} asteroids and ${mmoWorld.enemies.size} enemies`);
+}
+
 io.on('connection', (socket) => {
   console.log('Player connected:', socket.id);
 
@@ -711,18 +806,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', async () => {
     console.log('Player disconnected:', socket.id);
 
-    // Clean up MMO world if player was in it
-    if (socket.inMMOWorld && mmoWorld) {
-      const player = mmoWorld.players.get(socket.id);
-      mmoWorld.players.delete(socket.id);
-
-      io.to('mmo-world').emit('mmo-player-left', {
-        playerId: socket.id,
-        playerName: player?.name
-      });
-
-      console.log(`🌍 MMO: Player ${player?.name || socket.id} disconnected (${mmoWorld.players.size}/${MMO_CONFIG.maxPlayers})`);
-    }
+    removePlayerFromWorld(socket, 'disconnected');
 
     if (socket.sessionId) {
       socket.to(socket.sessionId).emit('player-disconnected', {
@@ -812,6 +896,11 @@ io.on('connection', (socket) => {
           console.log(`Updated simple session ${sessionId} state to 'playing'`);
         }
         
+        // Fresh server-ticked world for this session (replaces any finished one)
+        const existing = worlds.get(sessionId);
+        if (existing && existing.mode === 'coop') destroyWorld(existing);
+        getOrCreateCoopWorld(sessionId);
+
         io.to(sessionId).emit('game-started', {
           sessionId: sessionId,
           worldWidth: 2000,
@@ -1222,20 +1311,24 @@ io.on('connection', (socket) => {
   // Join MMO world (single persistent world)
   socket.on('mmo-join', (data) => {
     const { playerData } = data;
+    const worldId = data.sessionId && data.sessionId !== MMO_WORLD_ID ? data.sessionId : MMO_WORLD_ID;
+    const world = worldId === MMO_WORLD_ID ? mmoWorld : getOrCreateCoopWorld(worldId);
 
-    if (!mmoWorld) {
-      socket.emit('mmo-join-error', { error: 'MMO world not initialized' });
+    if (!world) {
+      socket.emit('mmo-join-error', { error: 'World not available' });
       return;
     }
 
-    if (mmoWorld.players.size >= MMO_CONFIG.maxPlayers) {
-      socket.emit('mmo-join-error', { error: 'World full (max 5 players)' });
-      return;
+    // Rejoining the same world keeps it alive; switching leaves the old one
+    if (socket.worldId === world.id) {
+      world.players.delete(socket.id);
+    } else if (socket.worldId) {
+      removePlayerFromWorld(socket, 'switched worlds');
     }
 
-    // Leave if already in MMO world (reconnecting)
-    if (socket.inMMOWorld) {
-      mmoWorld.players.delete(socket.id);
+    if (world.players.size >= world.maxPlayers) {
+      socket.emit('mmo-join-error', { error: `World full (max ${world.maxPlayers} players)` });
+      return;
     }
 
     // Create player object
@@ -1243,8 +1336,8 @@ io.on('connection', (socket) => {
       id: socket.id,
       name: playerData?.name || `Pilot_${socket.id.slice(-4)}`,
       score: 0,
-      x: mmoWorld.worldWidth / 2 + (Math.random() - 0.5) * 300,
-      y: mmoWorld.worldHeight / 2 + (Math.random() - 0.5) * 300,
+      x: world.worldWidth / 2 + (Math.random() - 0.5) * 300,
+      y: world.worldHeight / 2 + (Math.random() - 0.5) * 300,
       angle: Math.random() * Math.PI * 2,
       vx: 0,
       vy: 0,
@@ -1255,20 +1348,24 @@ io.on('connection', (socket) => {
     };
 
     // Add player to world
-    mmoWorld.players.set(socket.id, player);
-    socket.join('mmo-world');
-    socket.inMMOWorld = true;
+    world.players.set(socket.id, player);
+    socket.join(world.room);
+    socket.worldId = world.id;
 
-    console.log(`🌍 MMO: Player ${player.name} joined world (${mmoWorld.players.size}/${MMO_CONFIG.maxPlayers})`);
+    console.log(`🌍 MMO: Player ${player.name} joined ${world.id} (${world.players.size}/${world.maxPlayers})`);
 
     // Send current state to new player
     socket.emit('mmo-join-success', {
       player,
-      sessionId: MMO_WORLD_ID,
-      worldBounds: { width: mmoWorld.worldWidth, height: mmoWorld.worldHeight },
-      asteroids: Array.from(mmoWorld.asteroids.values()),
-      enemies: Array.from(mmoWorld.enemies.values()),
-      players: Array.from(mmoWorld.players.values()).map(p => ({
+      sessionId: world.id,
+      mode: world.mode,
+      round: world.round,
+      maxRounds: COOP_CONFIG.maxRounds,
+      lives: world.lives,
+      worldBounds: { width: world.worldWidth, height: world.worldHeight },
+      asteroids: Array.from(world.asteroids.values()),
+      enemies: Array.from(world.enemies.values()),
+      players: Array.from(world.players.values()).map(p => ({
         id: p.id,
         name: p.name,
         x: p.x,
@@ -1278,11 +1375,11 @@ io.on('connection', (socket) => {
         dead: p.dead,
         shipData: p.shipData
       })),
-      highestScore: getMMOHighestScore(mmoWorld)
+      highestScore: getMMOHighestScore(world)
     });
 
     // Notify other players
-    socket.to('mmo-world').emit('mmo-player-joined', {
+    socket.to(world.room).emit('mmo-player-joined', {
       playerId: socket.id,
       playerName: player.name,
       x: player.x,
@@ -1294,27 +1391,15 @@ io.on('connection', (socket) => {
 
   // Leave MMO world
   socket.on('mmo-leave', () => {
-    if (socket.inMMOWorld && mmoWorld) {
-      const player = mmoWorld.players.get(socket.id);
-      mmoWorld.players.delete(socket.id);
-
-      socket.to('mmo-world').emit('mmo-player-left', {
-        playerId: socket.id,
-        playerName: player?.name
-      });
-
-      console.log(`🌍 MMO: Player ${player?.name || socket.id} left world (${mmoWorld.players.size}/${MMO_CONFIG.maxPlayers})`);
-
-      socket.leave('mmo-world');
-      socket.inMMOWorld = false;
-    }
+    removePlayerFromWorld(socket, 'left');
   });
 
   // MMO player position/state update
   socket.on('mmo-player-update', (data) => {
-    if (!socket.inMMOWorld || !mmoWorld) return;
+    const world = worlds.get(socket.worldId);
+    if (!world) return;
 
-    const player = mmoWorld.players.get(socket.id);
+    const player = world.players.get(socket.id);
     if (!player) return;
 
     // Update player state
@@ -1328,9 +1413,10 @@ io.on('connection', (socket) => {
 
   // MMO player shoot
   socket.on('mmo-shoot', (data) => {
-    if (!socket.inMMOWorld || !mmoWorld) return;
+    const world = worlds.get(socket.worldId);
+    if (!world) return;
 
-    const player = mmoWorld.players.get(socket.id);
+    const player = world.players.get(socket.id);
     if (!player || player.dead) return;
 
     // Create bullet on server
@@ -1345,11 +1431,11 @@ io.on('connection', (socket) => {
       createdAt: Date.now()
     };
 
-    mmoWorld.bullets.push(bullet);
-    mmoDebug(`🔫 MMO: Bullet created at (${bullet.x.toFixed(0)}, ${bullet.y.toFixed(0)}), total bullets: ${mmoWorld.bullets.length}`);
+    world.bullets.push(bullet);
+    mmoDebug(`🔫 MMO: Bullet created at (${bullet.x.toFixed(0)}, ${bullet.y.toFixed(0)}), total bullets: ${world.bullets.length}`);
 
     // Broadcast bullet to all players (including shooter for visual)
-    io.to('mmo-world').emit('mmo-bullet-fired', {
+    io.to(world.room).emit('mmo-bullet-fired', {
       bullet,
       playerId: socket.id
     });
@@ -1357,28 +1443,39 @@ io.on('connection', (socket) => {
 
   // MMO player death (hit by enemy/asteroid)
   socket.on('mmo-player-died', () => {
-    if (!socket.inMMOWorld || !mmoWorld) return;
+    const world = worlds.get(socket.worldId);
+    if (!world) return;
 
-    const player = mmoWorld.players.get(socket.id);
+    const player = world.players.get(socket.id);
     if (!player || player.dead) return;
 
     player.dead = true;
     player.respawnTime = Date.now() + 3000; // 3 second respawn
 
     // Broadcast death
-    io.to('mmo-world').emit('mmo-player-died', {
+    io.to(world.room).emit('mmo-player-died', {
       playerId: socket.id,
       x: player.x,
       y: player.y
     });
 
+    if (world.mode === 'coop') {
+      world.lives = Math.max(0, world.lives - 1);
+      io.to(world.room).emit('mmo-lives', { lives: world.lives, lostBy: socket.id });
+      if (world.lives === 0) {
+        world.finished = true;
+        io.to(world.room).emit('mmo-game-over', { round: world.round, teamScore: getTeamScore(world) });
+        return;
+      }
+    }
+
     // Schedule respawn
     setTimeout(() => {
-      if (mmoWorld && mmoWorld.players.has(socket.id)) {
-        const p = mmoWorld.players.get(socket.id);
+      if (worlds.get(world.id) === world && world.players.has(socket.id) && !world.finished) {
+        const p = world.players.get(socket.id);
         p.dead = false;
-        p.x = mmoWorld.worldWidth / 2 + (Math.random() - 0.5) * 300;
-        p.y = mmoWorld.worldHeight / 2 + (Math.random() - 0.5) * 300;
+        p.x = world.worldWidth / 2 + (Math.random() - 0.5) * 300;
+        p.y = world.worldHeight / 2 + (Math.random() - 0.5) * 300;
 
         socket.emit('mmo-respawn', {
           x: p.x,
@@ -1386,7 +1483,7 @@ io.on('connection', (socket) => {
           angle: Math.random() * Math.PI * 2
         });
 
-        socket.to('mmo-world').emit('mmo-player-respawned', {
+        socket.to(world.room).emit('mmo-player-respawned', {
           playerId: socket.id,
           x: p.x,
           y: p.y
@@ -1397,24 +1494,25 @@ io.on('connection', (socket) => {
 
   // MMO ship collision (player hit asteroid or enemy)
   socket.on('mmo-ship-collision', (data) => {
-    if (!socket.inMMOWorld || !mmoWorld) return;
+    const world = worlds.get(socket.worldId);
+    if (!world) return;
 
     mmoDebug('💥 MMO: Ship collision event received:', data);
 
     if (data.type === 'asteroid') {
-      const asteroid = mmoWorld.asteroids.get(data.objectId);
+      const asteroid = world.asteroids.get(data.objectId);
       if (asteroid) {
         mmoDebug('💥 MMO: Destroying asteroid from ship collision:', data.objectId);
-        destroyMMOAsteroid(mmoWorld, asteroid, socket.id);
+        destroyMMOAsteroid(world, asteroid, socket.id);
       }
     } else if (data.type === 'enemy') {
-      const enemy = mmoWorld.enemies.get(data.objectId);
+      const enemy = world.enemies.get(data.objectId);
       if (enemy) {
         mmoDebug('💥 MMO: Destroying enemy from ship collision:', data.objectId);
-        mmoWorld.enemies.delete(data.objectId);
+        world.enemies.delete(data.objectId);
 
         // Broadcast destruction
-        io.to('mmo-world').emit('mmo-enemy-destroyed', {
+        io.to(world.room).emit('mmo-enemy-destroyed', {
           enemyId: data.objectId,
           destroyedBy: socket.id,
           x: data.x,
@@ -1426,14 +1524,15 @@ io.on('connection', (socket) => {
 
   // MMO bullet hit (client-side collision detection reports hit)
   socket.on('mmo-bullet-hit', (data) => {
-    if (!socket.inMMOWorld || !mmoWorld) return;
+    const world = worlds.get(socket.worldId);
+    if (!world) return;
 
     mmoDebug('💥 MMO: Bullet hit event received:', data);
 
-    const player = mmoWorld.players.get(socket.id);
+    const player = world.players.get(socket.id);
 
     if (data.type === 'asteroid') {
-      const asteroid = mmoWorld.asteroids.get(data.objectId);
+      const asteroid = world.asteroids.get(data.objectId);
       if (asteroid) {
         mmoDebug('💥 MMO: Destroying asteroid from bullet hit:', data.objectId);
 
@@ -1443,19 +1542,19 @@ io.on('connection', (socket) => {
           player.score += points;
           mmoDebug(`💥 MMO: Awarding ${points} points to ${player.name}, score=${player.score}`);
 
-          io.to('mmo-world').emit('mmo-score-update', {
+          io.to(world.room).emit('mmo-score-update', {
             playerId: socket.id,
             score: player.score,
             delta: points
           });
 
-          broadcastMMOHighestScore(mmoWorld);
+          broadcastMMOHighestScore(world);
         }
 
-        destroyMMOAsteroid(mmoWorld, asteroid, socket.id);
+        destroyMMOAsteroid(world, asteroid, socket.id);
       }
     } else if (data.type === 'enemy') {
-      const enemy = mmoWorld.enemies.get(data.objectId);
+      const enemy = world.enemies.get(data.objectId);
       if (enemy) {
         mmoDebug('💥 MMO: Enemy hit by bullet:', data.objectId);
         enemy.health = (enemy.health || 3) - 1;
@@ -1476,19 +1575,19 @@ io.on('connection', (socket) => {
             player.score += 500;
             mmoDebug(`💥 MMO: Awarding 500 points to ${player.name}, score=${player.score}`);
 
-            io.to('mmo-world').emit('mmo-score-update', {
+            io.to(world.room).emit('mmo-score-update', {
               playerId: socket.id,
               score: player.score,
               delta: 500
             });
 
-            broadcastMMOHighestScore(mmoWorld);
+            broadcastMMOHighestScore(world);
           }
 
-          mmoWorld.enemies.delete(data.objectId);
+          world.enemies.delete(data.objectId);
 
           // Broadcast destruction to ALL clients (including shooter for debris animation)
-          io.to('mmo-world').emit('mmo-enemy-destroyed', {
+          io.to(world.room).emit('mmo-enemy-destroyed', {
             enemyId: data.objectId,
             destroyedBy: socket.id,
             x: data.x,
@@ -1501,15 +1600,16 @@ io.on('connection', (socket) => {
 
   // MMO ship data sharing
   socket.on('mmo-ship-data', (data) => {
-    if (!socket.inMMOWorld || !mmoWorld) return;
+    const world = worlds.get(socket.worldId);
+    if (!world) return;
 
-    const player = mmoWorld.players.get(socket.id);
+    const player = world.players.get(socket.id);
     if (player) {
       player.shipData = data.shipData;
     }
 
     // Broadcast to other players
-    socket.to('mmo-world').emit('mmo-ship-data', {
+    socket.to(world.room).emit('mmo-ship-data', {
       playerId: socket.id,
       shipData: data.shipData
     });
