@@ -215,8 +215,8 @@ detectMobileDevice() {
                 this.togglePause();
             }
             
-            // Toggle collision debug mode with D key
-            if (e.key === 'd') {
+            // Toggle collision debug mode with backtick (D is movement)
+            if (e.code === 'Backquote') {
                 this.toggleCollisionDebug();
             }
         });
@@ -552,7 +552,7 @@ detectMobileDevice() {
         this.ctx.fillStyle = 'rgba(255, 255, 0, 0.7)';
         this.ctx.font = '16px Arial';
         this.ctx.textAlign = 'left';
-        this.ctx.fillText('DEBUG MODE: Press D to toggle', 20, this.canvas.height - 20);
+        this.ctx.fillText('DEBUG MODE: Press ` to toggle', 20, this.canvas.height - 20);
         
         // Draw ship info if available
         if (this.ship) {
